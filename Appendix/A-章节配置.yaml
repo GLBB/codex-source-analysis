@@ -1,0 +1,60 @@
+study:
+  title: "OpenAI Codex 源码深度研究"
+  subtitle: "从多入口分发到 App-Server JSON-RPC，从沙箱矩阵到 Plugin 市场"
+  source_baseline: "codex 仓库 main 分支 (May 2026)"
+  scale:
+    rust_crates: 120
+    sdk_languages:
+      - TypeScript
+      - Python
+    largest_subsystems:
+      - { name: "codex-rs/tui", loc: 193863 }
+      - { name: "codex-rs/core", loc: 151372 }
+      - { name: "codex-rs/app-server", loc: 39229 }
+      - { name: "codex-rs/core-plugins", loc: 21197 }
+      - { name: "codex-rs/state", loc: 15480 }
+      - { name: "codex-rs/windows-sandbox-rs", loc: 15902 }
+
+overview:
+  - id: overview-main
+    title: 总纲 — Codex 技术主线分析
+    filename: 总纲-Codex技术主线分析.md
+  - id: research
+    title: 全网调研 — 社区认知地图
+    filename: 全网调研-社区认知地图.md
+
+parts:
+  - id: part_1
+    name: Part I Principles and Usage
+    chapters:
+      - { id: ch01, title: 项目全景与设计哲学 }
+      - { id: ch02, title: 多入口与启动分发 }
+      - { id: ch03, title: 配置系统与企业要求 }
+      - { id: ch04, title: 初级使用方法 }
+      - { id: ch05, title: 高级使用方法 }
+      - { id: ch06, title: Agent 核心循环 }
+      - { id: ch07, title: Prompt 组装与 Skill 注入 }
+      - { id: ch08, title: Provider 与 Responses/Realtime API }
+  - id: part_2
+    name: Part II Source Analysis
+    chapters:
+      - { id: ch09, title: 工具系统总览 }
+      - { id: ch10, title: 命令执行与 unified_exec }
+      - { id: ch11, title: apply_patch 工具 }
+      - { id: ch12, title: macOS Seatbelt 与 Linux Bwrap 沙箱 }
+      - { id: ch13, title: Windows 沙箱与 WFP 防火墙 }
+      - { id: ch14, title: 执行策略 Starlark execpolicy }
+      - { id: ch15, title: 网络代理与策略 }
+      - { id: ch16, title: Hook 与生命周期事件 }
+      - { id: ch17, title: Plugin 市场系统 }
+      - { id: ch18, title: MCP 双向集成 }
+      - { id: ch19, title: 会话与轨迹持久化 }
+      - { id: ch20, title: 记忆系统 }
+      - { id: ch21, title: App-Server JSON-RPC 协议层 }
+  - id: part_3
+    name: Part III Comparative Analysis
+    chapters:
+      - { id: ch22, title: TUI 渲染管线与 Code Mode V8 }
+      - { id: ch23, title: Cloud Tasks 与外部 Agent 迁移 }
+      - { id: ch24, title: Codex vs Claude Code / Opencode 架构对比 }
+      - { id: ch25, title: Codex 沙箱与权限模型 vs 同类 }
