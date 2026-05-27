@@ -2,11 +2,11 @@
 
 ## 引言
 
-在 Codex 的工程体系里，“命令执行”不是一个孤立功能，而是连接模型推理、权限审批、沙箱边界、实时事件流和会话生命周期的中轴机制。第 10 章聚焦的 `unified_exec`，本质上是把“短命令执行”和“长生命周期交互进程”统一到一个可审批、可回放、可中断、可复用的执行平面中。它并不只是在 `exec` 上再套一层 API，而是在运行时语义上引入了 `process_id`、`write_stdin`、延迟网络审批、输出缓冲裁剪和后台清理策略。
+在 Codex 的工程体系里，“命令执行”不是一个孤立功能，而是连接模型推理、权限审批、沙箱边界、实时事件流和会话生命周期的一条主链路。本章聚焦的 `unified_exec`，从源码可以观察到一个明显的取向：把“短命令执行”和“长生命周期交互进程”收敛到同一个可审批、可回放、可中断、可复用的执行平面中。它并不只是在 `exec` 上再套一层 API，而是在运行时语义上引入了 `process_id`、`write_stdin`、延迟网络审批、输出缓冲裁剪和后台清理策略——这些都是可在源码里直接定位的实体。
 
-从源码规模看，这条链路跨度非常大：`core/src/exec.rs`（1510 行）、`core/src/unified_exec/process_manager.rs`（1299 行）、`shell-command/src/parse_command.rs`（2526 行）、`shell-escalation/src/unix/escalate_server.rs`（1064 行）、`core/src/exec_policy.rs`（1047 行）共同组成了“命令从模型 token 到 OS 进程”的完整闭环。仓库层面统计到 121 个 `Cargo.toml`，其中 120 个是可构建 package（脚本统计），而 `codex-rs/` 子树内部为 87 个 Rust crate（脚本统计），说明这一机制并非“单文件工具函数”，而是跨 crate 的基础设施能力。
+从源码规模看（基于 `wc -l` 实测），这条链路跨度较大：`codex-rs/core/src/exec.rs`（1510 行）、`codex-rs/core/src/unified_exec/process_manager.rs`（1299 行）、`codex-rs/shell-command/src/parse_command.rs`（2526 行）、`codex-rs/shell-escalation/src/unix/escalate_server.rs`（1064 行）、`codex-rs/core/src/exec_policy.rs`（1047 行）共同组成了“命令从模型 token 到 OS 进程”的执行闭环。仓库层面统计到 121 个 `Cargo.toml`，其中 120 个位于 `codex-rs/` 子树下；以 `find -maxdepth 2` 统计得到 87 个 workspace 成员 crate。可见这一机制并非“单文件工具函数”，而是跨 crate 的基础设施能力。
 
-本章按“全网调研补充 + 七维分析框架”展开，强调两件事：第一，所有核心判断都回到源码证据；第二，尽量用可复核的量化指标替代抽象描述。
+本章按“全网调研补充 + 七维分析框架”展开，强调两件事：第一，所有核心判断尽量回到可定位的源码证据；第二，凡是涉及“为什么这样设计”的解释，区分“源码事实”与“合理推测”。
 
 ## 全网调研补充
 
@@ -18,15 +18,15 @@
 - `Codex shell-command parser`
 - `Codex shell escalation`
 
-重点覆盖官方与社区源：OpenAI Developers、OpenAI 工程博文、Simon Willison、Hacker News、知乎/CSDN/博客园/中文教程站点，以及竞品官方文档（Claude Code / OpenCode / Aider / Goose / Continue）。
+参考了官方与社区源：OpenAI Developers、OpenAI 工程博文、Simon Willison、Hacker News、知乎/CSDN/博客园/中文教程站点，以及竞品官方文档（Claude Code / OpenCode / Aider / Goose / Continue）。下面的“共识”和“分歧”都属于二手观察，不代表源码强证据，仅作为讨论入口。
 
 ### 社区共识（高置信）
 
-1. **“沙箱边界 + 审批策略”是双层控制，而不是二选一。**  
+1. **“沙箱边界 + 审批策略”通常被视为双层控制，而不是二选一。**  
    官方文档反复强调 sandbox 决定技术边界，approval 决定交互闸门，`on-request` + `workspace-write` 是默认实践；`yolo` 等价于绕过两层控制。
-2. **长任务必须有进程级持续语义。**  
-   社区案例（例如 Simon Willison 的长时任务记录）反复出现“多小时连续 tool call + 大量 token 消耗”，这与 `unified_exec` 的后台 process 设计高度一致。
-3. **execpolicy 正在成为“可编排信任”的主入口。**  
+2. **长任务一般需要进程级持续语义。**  
+   社区案例（例如 Simon Willison 的长时任务记录）反复出现“多小时连续 tool call + 大量 token 消耗”，与 `unified_exec` 的后台 process 设计方向一致。
+3. **execpolicy 正在被讨论为“可编排信任”的入口之一。**  
    讨论从“硬编码 safelist 是否够用”转向“prefix_rule 是否能表达团队信任边界”。
 
 ### 主要分歧与常见误解
@@ -36,30 +36,30 @@
 2. **误解 B：有命令解析器就能“判定命令绝对安全”。**  
    OpenCode 社区与 Aider/Goose 外部审计都指出，纯 pattern matching 永远存在边界条件，最终仍需 OS 级约束。
 3. **误解 C：`auto_review` 会自动扩大权限。**  
-   官方说明是“reviewer 替换”，不是权限升级；权限边界仍由当前 sandbox/approval 配置决定。
+   官方说明是“reviewer 替换”，权限边界仍由当前 sandbox/approval 配置决定。
 4. **误解 D：输出异常一定是 Codex 执行层 bug。**  
-   社区 issue 有不少是本地 shell 环境破损导致，体现了运行时与用户环境的耦合复杂性。
+   社区 issue 有不少其实是本地 shell 环境破损导致，体现了运行时与用户环境的耦合复杂性。
 
 ### 社区盲区（本章重点补齐）
 
-1. **很少有人系统讲清 `process_id` 的分配/回收/淘汰策略。**
-2. **很少讨论“网络审批延迟拒绝”如何异步终止已启动进程。**
-3. **较少分析 `used_complex_parsing` 对 execpolicy 自动修正规则提案的影响。**
-4. **对 Unix escalation 协议多停留在“有升权”，而非消息与 FD 转发细节。**
-5. **对 `HeadTailBuffer` 的“中间截断”语义讨论不足，容易误判输出完整性。**
+1. 很少有人系统讲清 `process_id` 的分配/回收/淘汰策略。
+2. 很少讨论“网络审批延迟拒绝”如何异步终止已启动进程。
+3. 较少分析 `used_complex_parsing` 对 execpolicy 自动修正规则提案的影响。
+4. 对 Unix escalation 协议多停留在“有升权”，而非消息与 FD 转发细节。
+5. 对 `HeadTailBuffer` 的“中间截断”语义讨论不足，容易误判输出完整性。
 
 ---
 
 ## 一、本质是什么：`unified_exec` 在 Codex 架构中的定位
 
-`unified_exec` 的本质不是“再发一次 shell 命令”，而是**把交互式进程运行时做成一个有状态资源**：它拥有生命周期、输出流、审批缓存键、沙箱上下文和事件语义。
+从源码可以观察到，`unified_exec` 不只是“再发一次 shell 命令”：它把交互式进程运行时**显式建模为一个有状态资源**——拥有生命周期、输出流、审批缓存键、沙箱上下文和事件语义。
 
 ```rust
 // codex-rs/core/src/unified_exec/mod.rs:1
 //! Unified Exec: interactive process execution orchestrated with approvals + sandboxing.
 ```
 
-模块注释直接给出定位：审批、沙箱、重试、PTY 进程管理统一编排，并明确拆分 `process.rs / process_manager.rs / process_state.rs` 三层职责。
+模块顶层注释直接表明定位：审批、沙箱、重试、PTY 进程管理统一编排，并明确拆分 `process.rs / process_manager.rs / process_state.rs` 三层职责。
 
 ```rust
 // codex-rs/core/src/unified_exec/mod.rs:13
@@ -78,12 +78,14 @@ pub async fn process_exec_tool_call(...) -> Result<ExecToolCallOutput> {
 }
 ```
 
-`unified_exec` 运行时则显式实现 `Sandboxable + Approvable + ToolRuntime` 三个能力接口，说明其定位是“受控工具运行时”而非“单次命令函数”。
+`unified_exec` 运行时则显式实现 `Sandboxable + Approvable + ToolRuntime` 三个能力接口，可以看出它在工具运行时层面被作为“受控工具运行时”一等公民处理。
 
 ```rust
 // codex-rs/core/src/tools/runtimes/unified_exec.rs:120
 impl Sandboxable for UnifiedExecRuntime<'_> { ... }
+// codex-rs/core/src/tools/runtimes/unified_exec.rs:130
 impl Approvable<UnifiedExecRequest> for UnifiedExecRuntime<'_> { ... }
+// codex-rs/core/src/tools/runtimes/unified_exec.rs:221
 impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRuntime<'a> { ... }
 ```
 
@@ -96,7 +98,7 @@ unified_exec_manager: UnifiedExecProcessManager::new(
 ),
 ```
 
-结论：`unified_exec` 是 Codex “可执行性”的状态化内核，不是“shell 工具别名”。
+判断：基于上述源码证据，`unified_exec` 更接近 Codex “可执行性”的状态化内核，而不是“shell 工具别名”。这是从结构定位、Trait 实现和 Session 持有关系三方面综合得出的，源码可证。
 
 ---
 
@@ -104,7 +106,7 @@ unified_exec_manager: UnifiedExecProcessManager::new(
 
 ### 2.1 痛点一：模型表达无限，命令安全判定有限
 
-命令字符串可以无限复杂，但审批与安全判定必须可计算、可解释、可回放。`parse_command` 文件自己就给出“不要手改”的维护警告，这不是玩笑，而是复杂度告警。
+命令字符串可以无限复杂，但审批与安全判定必须可计算、可解释、可回放。`parse_command` 文件自己就给出“不要手改”的维护警告，可以视为复杂度的告警信号。
 
 ```rust
 // codex-rs/shell-command/src/parse_command.rs:20
@@ -112,7 +114,7 @@ unified_exec_manager: UnifiedExecProcessManager::new(
 /// This parsing code is quite complex and not easy to hand-modify.
 ```
 
-量化上，`parse_command.rs` 2526 行，`summarize_main_tokens()` 单函数 426 行（2074-2499，脚本统计），内建测试 79 个（脚本统计），说明其复杂度已接近“独立子系统”。
+量化上（脚本统计），`parse_command.rs` 2526 行，`summarize_main_tokens()` 单函数 426 行（2074-2499），同文件 `#[test]` 数量 79 个，说明其复杂度已接近“独立子系统”。
 
 ### 2.2 痛点二：长进程不能等同于短命令
 
@@ -123,7 +125,7 @@ unified_exec_manager: UnifiedExecProcessManager::new(
 - 既要流式事件，也要快照式结果；
 - 还要在审批拒绝、网络拒绝、会话关闭时可回收。
 
-源码里最关键的一句是“先持久化 live session，再等待首次 yield”，直接针对“turn 被中断导致进程提前 drop”的竞态：
+源码里有一句直接针对“turn 被中断导致进程提前 drop”的注释，可以看作该问题在工程历史上确实出现过：
 
 ```rust
 // codex-rs/core/src/unified_exec/process_manager.rs:413
@@ -137,9 +139,12 @@ unified_exec_manager: UnifiedExecProcessManager::new(
 
 ```rust
 // codex-rs/core/src/exec_policy.rs:632
-pub(crate) fn render_decision_for_unmatched_command(...) -> Decision {
-    let is_known_safe = ... is_known_safe_command(command)
-    let command_is_dangerous = ... command_might_be_dangerous(command)
+pub(crate) fn render_decision_for_unmatched_command(
+    command: &[String],
+    context: UnmatchedCommandContext<'_>,
+) -> Decision {
+    let is_known_safe = ... is_known_safe_command(command);
+    let command_is_dangerous = ... command_might_be_dangerous(command);
 }
 ```
 
@@ -152,7 +157,7 @@ let auto_amendment_allowed = !used_complex_parsing;
 
 ### 2.4 痛点四：跨平台执行边界与升权协议
 
-Unix 场景下，升权不是“直接 sudo”，而是单独协议通道 + FD 转发 + policy 决策。`EscalationExecution` 三态（`Unsandboxed/TurnDefault/Permissions`）意味着系统要支持“细粒度重执行语义”，不只是 yes/no。
+Unix 场景下，升权不是“直接 sudo”，而是单独协议通道 + FD 转发 + policy 决策。`EscalationExecution` 三态（`Unsandboxed/TurnDefault/Permissions`）说明系统要支持“细粒度重执行语义”，不只是 yes/no。
 
 ```rust
 // codex-rs/shell-escalation/src/unix/escalate_protocol.rs:45
@@ -186,7 +191,7 @@ flowchart LR
 
 </div>
 
-这张图的关键是“策略在前、进程在后”：`Handler` 只做参数与请求构建，`Runtime` 负责审批与沙箱编排，`ProcessManager` 才负责状态化进程实体。
+可以观察到的结构特点是“策略在前、进程在后”：`Handler` 只做参数与请求构建，`Runtime` 负责审批与沙箱编排，`ProcessManager` 才负责状态化进程实体。
 
 ### 3.2 启动流程图（`exec_command` 首次调用）
 
@@ -208,7 +213,7 @@ flowchart TD
 
 </div>
 
-此处最关键设计是 **ID 先分配** + **失败路径主动释放**，避免僵尸保留。
+此处可观察到的设计是 **ID 先分配 + 失败路径主动释放**，从源码看可以避免僵尸保留。
 
 ```rust
 // codex-rs/core/src/unified_exec/process_manager.rs:332
@@ -347,7 +352,7 @@ let resolved_command = get_command(...)?;
 manager.exec_command(ExecCommandRequest { ... }, &context).await
 ```
 
-`ExecCommandArgs` 11 个字段（`cmd/workdir/shell/login/tty/yield_time_ms/...`）用于承接模型参数，`ExecCommandRequest` 16 个字段用于运行时结构化请求。
+`ExecCommandArgs` 11 个字段（`cmd/workdir/shell/login/tty/yield_time_ms/max_output_tokens/sandbox_permissions/additional_permissions/justification/prefix_rule`）用于承接模型参数；`ExecCommandRequest` 16 个字段用于运行时结构化请求。
 
 ```rust
 // codex-rs/core/src/tools/handlers/unified_exec.rs:27
@@ -359,15 +364,17 @@ pub(crate) struct ExecCommandRequest { ... 16 fields ... }
 登录 shell 是否允许由配置硬约束：
 
 ```rust
-// codex-rs/core/src/tools/handlers/unified_exec.rs:104
+// codex-rs/core/src/tools/handlers/unified_exec.rs:105
 Some(true) if !allow_login_shell => {
-    return Err("login shell is disabled by config ...".to_string());
+    return Err(
+        "login shell is disabled by config; omit `login` or set it to false.".to_string(),
+    );
 }
 ```
 
 ### 4.2 运行时层：审批键、缓存与网络审批触发
 
-`UnifiedExecApprovalKey` 把命令、cwd、tty、sandbox 权限等合并为缓存键，避免“同类命令重复弹窗”。
+`UnifiedExecApprovalKey` 把命令、cwd、tty、sandbox 权限等合并为缓存键，有助于减少“同类命令重复弹窗”。
 
 ```rust
 // codex-rs/core/src/tools/runtimes/unified_exec.rs:82
@@ -399,6 +406,8 @@ Some(NetworkApprovalSpec {
 })
 ```
 
+可以观察到的取向是：在“启动时延”和“风险控制”之间做权衡，不强求“启动前先拿到全部网络许可”。
+
 ### 4.3 策略层：execpolicy 与 safe/dangerous heuristic 的并联
 
 `create_exec_approval_requirement_for_command` 负责把策略计算成三态结果：`Forbidden / NeedsApproval / Skip`。
@@ -426,7 +435,7 @@ let auto_amendment_allowed = !used_complex_parsing;
 
 ### 4.4 解析层：`parse_command` 与 bash tree-sitter 组合
 
-`parse_command` 的顶层策略是“先解析、后去重、若含 unknown 则整体降级为单 unknown”，保守但稳定。
+`parse_command` 的顶层策略是“先解析、后去重、若含 unknown 则整体降级为单 unknown”，可以视为保守优先的设计取向。
 
 ```rust
 // codex-rs/shell-command/src/parse_command.rs:30
@@ -440,7 +449,7 @@ pub fn parse_command(command: &[String]) -> Vec<ParsedCommand> {
 }
 ```
 
-`ParsedCommand` 枚举只有 4 类（`Read/ListFiles/Search/Unknown`），体现“低维语义摘要”设计。
+`ParsedCommand` 枚举只有 4 类（`Read / ListFiles / Search / Unknown`），可以观察到这是一种“低维语义摘要”的取向，便于 UI 与日志统一展示。
 
 ```rust
 // codex-rs/protocol/src/parse_command.rs:9
@@ -461,11 +470,11 @@ const ALLOWED_KINDS: &[&str] = &[ ... ];
 const ALLOWED_PUNCT_TOKENS: &[&str] = &["&&", "||", ";", "|", "\"", "'"];
 ```
 
-量化：`ALLOWED_KINDS` 11 项、`ALLOWED_PUNCT_TOKENS` 6 项、`bash.rs` 测试 29 个（脚本统计）。
+量化（脚本统计）：`ALLOWED_KINDS` 11 项、`ALLOWED_PUNCT_TOKENS` 6 项、`bash.rs` 中 `#[test]` 29 个。
 
 ### 4.5 安全判定层：safe list 与危险选项筛查
 
-`is_safe_to_call_with_exec()` 对 24 个常见只读命令直接放行（`cat/ls/wc/...`），再对 `find/rg/git/sed/base64` 做特判。
+`is_safe_to_call_with_exec()` 对 24 个常见只读命令（`cat/cd/cut/echo/expr/false/grep/head/id/ls/nl/paste/pwd/rev/seq/stat/tail/tr/true/uname/uniq/wc/which/whoami`）直接放行，再对 `find/rg/git/sed/base64` 做特判。
 
 ```rust
 // codex-rs/shell-command/src/command_safety/is_safe_command.rs:72
@@ -473,7 +482,7 @@ Some(
     "cat" | "cd" | "cut" | ... | "whoami") => true
 ```
 
-危险选项常量化，减少回归：
+危险选项常量化，便于减少回归：
 
 ```rust
 // codex-rs/shell-command/src/command_safety/is_safe_command.rs:115
@@ -489,6 +498,7 @@ dangerous heuristic 目前很克制：核心是 `rm -f/-rf` 与 `sudo` 递归展
 ```rust
 // codex-rs/shell-command/src/command_safety/is_dangerous_command.rs:149
 Some("rm") => matches!(command.get(1).map(String::as_str), Some("-f" | "-rf")),
+// codex-rs/shell-command/src/command_safety/is_dangerous_command.rs:152
 Some("sudo") => is_dangerous_to_call_with_exec(&command[1..]),
 ```
 
@@ -523,6 +533,8 @@ pub(crate) fn is_likely_sandbox_denied(...) -> bool {
     const QUICK_REJECT_EXIT_CODES: [i32; 3] = [2, 126, 127];
 }
 ```
+
+源码注释明确承认这是一种概率判定，不是形式化证明，存在边界条件——这意味着维护成本会随 shell 生态变化而持续。
 
 ### 4.7 进程层：`UnifiedExecProcessManager` 与 `UnifiedExecProcess`
 
@@ -576,10 +588,10 @@ pub(crate) fn new(max_bytes: usize) -> Self {
 
 ### 4.8 升权层：`shell-escalation` 的协议化执行
 
-`EscalateServer::start_session()` 只生成环境 overlay，不接管 shell 的完整生命周期，边界清晰。
+`EscalateServer::start_session()` 只生成环境 overlay，不接管 shell 的完整生命周期，边界相对清晰。
 
 ```rust
-// codex-rs/shell-escalation/src/unix/escalate_server.rs:205
+// codex-rs/shell-escalation/src/unix/escalate_server.rs:206
 env.insert(ESCALATE_SOCKET_ENV_VAR.to_string(), client_socket_fd.to_string());
 env.insert(EXEC_WRAPPER_ENV_VAR.to_string(), self.execve_wrapper.to_string_lossy().to_string());
 ```
@@ -587,7 +599,7 @@ env.insert(EXEC_WRAPPER_ENV_VAR.to_string(), self.execve_wrapper.to_string_lossy
 `handle_escalate_session_with_policy()` 根据策略走三分支：`Run / Escalate / Deny`，并在 `Escalate` 分支执行 FD 映射后重启命令。
 
 ```rust
-// codex-rs/shell-escalation/src/unix/escalate_server.rs:288
+// codex-rs/shell-escalation/src/unix/escalate_server.rs:289
 match decision {
     EscalationDecision::Run => { ... }
     EscalationDecision::Escalate(execution) => { ... }
@@ -597,7 +609,7 @@ match decision {
 
 ### 4.9 事件与会话收尾：防泄漏与可观测
 
-`ToolEmitter::unified_exec()` 在 Begin 阶段即集成 `parse_command()`，保证 UI 与日志侧能拿到统一语义摘要。
+`ToolEmitter::unified_exec()` 在 Begin 阶段即集成 `parse_command()`，UI 与日志侧能在第一时间拿到统一语义摘要。
 
 ```rust
 // codex-rs/core/src/tools/events.rs:151
@@ -616,7 +628,7 @@ pub async fn clean_background_terminals(sess: &Arc<Session>) {
 }
 ```
 
-最终落到 `terminate_all_processes()`，shutdown 时也会统一调用，避免残留后台进程。
+最终落到 `terminate_all_processes()`，shutdown 时也会统一调用：
 
 ```rust
 // codex-rs/core/src/tasks/mod.rs:839
@@ -624,6 +636,8 @@ pub(crate) async fn close_unified_exec_processes(&self) {
     self.services.unified_exec_manager.terminate_all_processes().await;
 }
 ```
+
+可以观察到的设计是：显式清理与隐式 shutdown 两条路径都会汇聚到同一终止函数，有助于减少残留后台进程。
 
 ---
 
@@ -640,7 +654,7 @@ Some(true) if !allow_login_shell => return Err("login shell is disabled ...")
 
 ### 2) 解析降级导致“全局 unknown”
 
-`parse_command()` 只要包含一个 `Unknown`，就会整体降级为单 `Unknown`，这有助于保守安全，但会损失部分结构化可解释性。
+`parse_command()` 只要包含一个 `Unknown`，就会整体降级为单 `Unknown`。这种取向有助于保守安全，但会损失部分结构化可解释性。
 
 ```rust
 // codex-rs/shell-command/src/parse_command.rs:40
@@ -651,7 +665,7 @@ if deduped.iter().any(|cmd| matches!(cmd, ParsedCommand::Unknown { .. })) {
 
 ### 3) `used_complex_parsing=true` 会抑制自动规则修正提案
 
-这条逻辑容易被忽略，导致“为什么某些命令不建议自动写入规则”。
+这条逻辑容易被忽略，导致“为什么某些命令不建议自动写入规则”的疑问。
 
 ```rust
 // codex-rs/core/src/exec_policy.rs:294
@@ -674,13 +688,13 @@ pub(crate) const MIN_EMPTY_YIELD_TIME_MS: u64 = 5_000;
 ```rust
 // codex-rs/core/src/unified_exec/mod.rs:71
 pub(crate) const MAX_UNIFIED_EXEC_PROCESSES: usize = 64;
-// codex-rs/core/src/unified_exec/process_manager.rs:1244
+// codex-rs/core/src/unified_exec/process_manager.rs:1246
 let protected: HashSet<i32> = by_recency.iter().take(8).map(...).collect();
 ```
 
 ### 6) `zsh-fork` 后端不支持 remote environment
 
-该分支不是“性能优化可选项”，而是带显式边界条件。
+这是带显式边界条件的硬约束，不是“性能优化可选项”。
 
 ```rust
 // codex-rs/core/src/tools/runtimes/unified_exec.rs:307
@@ -691,7 +705,7 @@ if req.environment.is_remote() {
 
 ### 7) 安全判定是启发式，不是形式化证明
 
-`is_likely_sandbox_denied()` 本质是概率判定（关键词 + 特殊退出码），存在误报/漏报边界。
+`is_likely_sandbox_denied()` 本质是概率判定（关键词 + 特殊退出码），源码注释自身就承认存在不确定性，因而存在误报/漏报边界。
 
 ```rust
 // codex-rs/core/src/exec.rs:784
@@ -715,7 +729,7 @@ async fn shutdown_session_runtime(sess: &Arc<Session>) {
 
 ## 六、竞品对比：同类系统在命令执行面怎么做
 
-> 说明：本节对比基于公开文档与公开仓库信息；Codex 侧论据来自源码，其他系统侧来自官方文档/公开审计材料，不推断私有实现细节。
+> 说明：本节对比基于公开文档与公开仓库信息；Codex 侧论据来自源码，其他系统侧来自官方文档/公开审计材料，不推断其私有实现细节，结论以可辩护表述为主。
 
 ### 6.1 对比维度
 
@@ -724,34 +738,34 @@ async fn shutdown_session_runtime(sess: &Arc<Session>) {
 - 是否具备 OS 级沙箱与越权重执行协议
 - headless/CI 下审批语义是否清晰
 
-### 6.2 Codex 的独特点（源码可证）
+### 6.2 Codex 的可观察特点（源码可证）
 
-1. **有状态进程模型**：`exec_command + write_stdin + process_id`，并且进程在 manager 里持续存活。  
+1. **有状态进程模型**：`exec_command + write_stdin + process_id`，进程在 manager 里持续存活。  
 2. **审批缓存键显式化**：`UnifiedExecApprovalKey` 把命令上下文组合成可重用键。  
 3. **execpolicy 与 heuristic 组合**：不是单 allowlist，也不是纯手工规则。  
 4. **Unix 升权协议化**：`EscalationDecision + EscalationExecution + FD 转发`。  
 5. **输出中间截断策略**：`HeadTailBuffer` 对超长输出保头保尾。  
 
-### 6.3 与 Claude Code / Continue / Aider / Goose / OpenCode 的差异
+### 6.3 与 Claude Code / Continue / Aider / Goose / OpenCode 的差异（基于公开资料）
 
 1. **Claude Code**  
-   官方文档重点在 hooks 与 permission rules，可在 `PreToolUse` 拦截工具调用，治理面很强；但公开材料更强调“规则/Hook 编排”，而不是类似 `process_id + write_stdin` 的统一长进程 API。
+   官方文档重点在 hooks 与 permission rules，可在 `PreToolUse` 拦截工具调用，治理面较完善；公开材料更强调“规则/Hook 编排”，从公开文档看不到类似 `process_id + write_stdin` 的统一长进程 API。
 
 2. **Continue CLI**  
-   `allow/ask/exclude` 策略体系清晰，`--readonly/--auto` 模式优先级明确；headless 下 `ask` 工具会被排除，这对 CI 很友好，但长进程交互抽象不如 Codex `unified_exec` 明确。
+   `allow/ask/exclude` 策略体系清晰，`--readonly/--auto` 模式优先级明确；headless 下 `ask` 工具会被排除，对 CI 友好，但公开资料中长进程交互抽象不如 Codex `unified_exec` 突出。
 
 3. **Aider**  
    `/run` 与 `/test` 走用户触发模型建议，公开资料显示默认并无内建 OS 沙箱，更多依赖用户外部隔离（容器/runner）。
 
 4. **Goose**  
-   有 tool permission 配置与模式切换，但公开资料普遍提示“默认运行在本机权限下”，沙箱通常由外部包装实现。
+   有 tool permission 配置与模式切换，公开资料普遍提到“默认运行在本机权限下”，沙箱通常由外部包装实现。
 
 5. **OpenCode**  
-   权限配置较灵活，也有社区 sandbox plugin；但“exec 语义是否拆分成统一长进程运行时”在公开资料里不如 Codex 明确，更多体现为插件/策略组合。
+   权限配置较灵活，社区也有 sandbox plugin；从公开材料看，“exec 语义是否拆分成统一长进程运行时”这一点描述不如 Codex 明确，更多体现为插件/策略组合。
 
-### 6.4 对比结论
+### 6.4 对比小结
 
-Codex 在“命令执行面”的差异化不只在安全策略，而在**把安全策略、进程状态、输出语义、审批缓存和会话生命周期合并成一个运行时对象**。这让它在复杂任务（长测试、交互式 REPL、分段执行）中具备更一致的控制面。
+可以观察到，Codex 在“命令执行面”的差异化不仅在安全策略层面，更体现在**把策略、进程状态、输出语义、审批缓存和会话生命周期合并到同一个运行时对象**这一取向上。是否更优要看场景；对长任务、交互式 REPL、分段执行等需要持续控制面的工作流，这种统一抽象的可控性体感会更明显。
 
 ---
 
@@ -759,15 +773,15 @@ Codex 在“命令执行面”的差异化不只在安全策略，而在**把安
 
 ### 7.1 启发式判定仍可能误报/漏报
 
-`is_likely_sandbox_denied()` 依赖关键词与退出码，无法覆盖所有 shell 初始化噪声、工具链自定义错误文本，工程上仍需持续补词和回归。
+`is_likely_sandbox_denied()` 依赖关键词与退出码，难以覆盖全部 shell 初始化噪声、工具链自定义错误文本，工程上需要持续补词和回归。
 
 ### 7.2 解析器复杂度高，维护成本持续上升
 
-`parse_command.rs` 的复杂度与“手改风险”已经在源码注释中明确，虽然测试覆盖高，但仍建议继续模块化拆分 `summarize_main_tokens`（426 行）。
+`parse_command.rs` 的复杂度与“手改风险”已经在源码注释中明确，虽然测试覆盖较高（79 个 `#[test]`），但仍建议继续模块化拆分 `summarize_main_tokens`（426 行）。
 
 ### 7.3 safelist 是静态集合，领域迁移成本高
 
-24 项固定安全命令 + 若干特判规则很实用，但面对新工具链（语言生态命令、企业内工具）时，仍需依赖 execpolicy 才能避免“频繁 prompt / 误判阻塞”。
+24 项固定安全命令 + 若干特判规则在常见场景实用，但面对新工具链（语言生态命令、企业内工具）时，仍需依赖 execpolicy 才能避免“频繁 prompt / 误判阻塞”。
 
 ### 7.4 进程池淘汰策略偏经验法则
 
@@ -775,32 +789,30 @@ Codex 在“命令执行面”的差异化不只在安全策略，而在**把安
 
 ### 7.5 配置分层对用户心智仍有门槛
 
-`allow_login_shell`、`background_terminal_max_timeout`、`use_experimental_unified_exec_tool`、approval policy、execpolicy、runtime feature flag 同时存在，排障时需要较强配置意识。
+`allow_login_shell`、`background_terminal_max_timeout`、`use_experimental_unified_exec_tool`、approval policy、execpolicy、runtime feature flag 同时存在，排障时需要较强的配置意识。
 
 ```rust
-// codex-rs/core/src/config/mod.rs:942
-pub use_experimental_unified_exec_tool: bool;
+// codex-rs/core/src/config/mod.rs:943
+pub use_experimental_unified_exec_tool: bool,
 // codex-rs/core/src/config/mod.rs:947
-pub background_terminal_max_timeout: u64;
+pub background_terminal_max_timeout: u64,
 ```
 
 ### 7.6 升权链路虽清晰，但跨平台一致性仍是长期课题
 
-Unix escalation 协议设计完整，但不同平台的沙箱/升权能力与行为细节仍可能有偏差；这类偏差通常在边缘命令与企业环境中暴露。
+Unix escalation 协议设计相对完整，但不同平台的沙箱/升权能力与行为细节仍可能有偏差；这类偏差通常在边缘命令与企业环境中暴露。
 
 ## 附：七维深入拆解（工程复盘版）
 
-前文已经给出结构化结论，但如果把目标从“理解功能”提升到“可维护、可演进、可排障”，还需要再往下走一层：不仅看“做了什么”，还要看“为什么这样做”“这样做的副作用是什么”“未来改动会碰到哪些硬边界”。这一节就是这层复盘。
+前文已经给出结构化结论，但如果把目标从“理解功能”提升到“可维护、可演进、可排障”，还需要再往下走一层：不仅看“做了什么”，还要看“为什么这样做”“这样做的副作用是什么”“未来改动会碰到哪些硬边界”。这一节就是这层复盘。需要说明：以下“为什么”的部分中，凡是无法从源码直接证明的部分，都尽量加上“可能/或许”等审慎措辞。
 
-### A. 本质层复盘：它为何必须做成状态化运行时
+### A. 本质层复盘：为何选择做成状态化运行时
 
-在很多工具里，命令执行只是一次函数调用：给定命令，得到结果，生命周期在函数内闭合。Codex 的 `unified_exec` 则明确否定这种模型。它把执行行为抽象为**可续写、可观察、可回收**的状态资源，这个资源需要贯穿 turn 甚至会话级别。
-
-这种建模体现在三个位置：
+在很多工具里，命令执行只是一次函数调用：给定命令，得到结果，生命周期在函数内闭合。Codex 的 `unified_exec` 从结构上明显偏离了这种模型。它把执行行为抽象为**可续写、可观察、可回收**的状态资源，这个资源贯穿 turn 甚至会话级别。这种取向背后的动机源码未直接说明，但可以从以下三处观察到一致的设计意图：
 
 1. **请求对象是长生命周期导向的**：`ExecCommandRequest` 不只有命令和 cwd，还有 `process_id`、`yield_time_ms`、`tty`、`additional_permissions`、`prefix_rule` 等行为控制字段。  
 2. **存储对象显式保存进程实体**：`ProcessEntry` 记录 `process`、`call_id`、`network_approval`、`last_used`，不是“执行完即丢”。  
-3. **关闭路径在 Session 生命周期中可达**：`clean_background_terminals` 与 shutdown 都会触发终止，确保后台不会“失联”。
+3. **关闭路径在 Session 生命周期中可达**：`clean_background_terminals` 与 shutdown 都会触发终止。
 
 ```rust
 // codex-rs/core/src/unified_exec/mod.rs:90
@@ -813,7 +825,7 @@ pub async fn clean_background_terminals(sess: &Arc<Session>) {
 }
 ```
 
-这个选择的工程意义非常大：它允许 Codex 处理“持续输出、分段输入、策略变更后续处理”这类传统 shell 调用无法优雅表达的场景。代价是系统复杂度明显上升，但收益是自治任务的稳定性和一致性。
+这种选择的工程意义可能比较大：它允许 Codex 处理“持续输出、分段输入、策略变更后续处理”这类传统 shell 调用不易优雅表达的场景。代价是系统复杂度明显上升，但收益体现在自治任务的稳定性和一致性上。
 
 ### B. 痛点层复盘：真正棘手的是“多约束同时成立”
 
@@ -825,7 +837,7 @@ pub async fn clean_background_terminals(sess: &Arc<Session>) {
 - 进程要能长期存活，又不能无限占资源；
 - turn 结束逻辑不能错误提前收口。
 
-这类“多目标优化”在源码里最典型的体现是 turn 的 `needs_follow_up` 逻辑：模型流结束并不等于回合业务结束，工具执行结果会继续影响回合推进。
+这类“多目标优化”在源码里一个比较典型的体现是 turn 的 `needs_follow_up` 逻辑：模型流结束并不等于回合业务结束，工具执行结果会继续影响回合推进。
 
 ```rust
 // codex-rs/core/src/session/turn.rs:1729
@@ -835,17 +847,17 @@ let mut needs_follow_up = false;
 needs_follow_up |= output_result.needs_follow_up;
 ```
 
-这条链路解释了一个常见误区：很多用户以为“模型回复 completed”就说明系统空闲。事实上，在 `unified_exec` 场景里，后台 process 仍可能活着，后续 `write_stdin` 轮询会继续推进状态。
+这条链路可以解释一个常见误区：很多用户以为“模型回复 completed”就说明系统空闲。事实上，在 `unified_exec` 场景里，后台 process 仍可能活着，后续 `write_stdin` 轮询会继续推进状态。
 
-### C. 方案层复盘：审批、策略、执行的顺序为什么不能乱
+### C. 方案层复盘：审批、策略、执行的顺序为什么重要
 
-`unified_exec` 的关键工程决定是把流程拆成三段并固定顺序：
+`unified_exec` 的一个关键工程取向是把流程拆成三段并固定顺序：
 
 1. **可否执行（policy + approval）**  
 2. **如何执行（sandbox + environment transform）**  
 3. **执行后如何持续管理（process manager）**
 
-如果顺序倒置（例如先跑再补审批），会直接破坏审计可解释性；如果把审批与策略分散在多个地方，会导致同命令在不同入口行为不一致。Codex 通过 runtime trait 组合把这件事收敛到了单路径。
+如果顺序倒置（例如先跑再补审批），会直接破坏审计可解释性；如果把审批与策略分散在多个地方，可能导致同命令在不同入口行为不一致。Codex 通过 runtime trait 组合把这件事收敛到了单路径，源码上可以看到 `Approvable` 与 `ToolRuntime` 接口的分离。
 
 ```rust
 // codex-rs/core/src/tools/runtimes/unified_exec.rs:130
@@ -854,17 +866,17 @@ impl Approvable<UnifiedExecRequest> for UnifiedExecRuntime<'_> { ... }
 impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRuntime<'a> { ... }
 ```
 
-再看策略侧，`create_exec_approval_requirement_for_command()` 的输出不是简单 bool，而是 `Forbidden / NeedsApproval / Skip` 三态，并可附带 amendment 提案。这让“决策”和“后续治理建议”在同一个计算点上产出，减少跨层信息丢失。
+再看策略侧，`create_exec_approval_requirement_for_command()` 的输出不是简单 bool，而是 `Forbidden / NeedsApproval / Skip` 三态，并可附带 amendment 提案。这让“决策”和“后续治理建议”在同一个计算点上产出，可以减少跨层信息丢失。
 
 ### D. 实现层复盘：最容易被忽略的四条暗线
 
-#### D.1 暗线一：`process_id` 的保留集合防的是竞态，不是美观
+#### D.1 暗线一：`process_id` 的保留集合用于防竞态
 
 系统先把 ID 放进 `reserved_process_ids`，再进行真实启动。这样即使启动失败，也不会因为并发分配导致“同 ID 双占用”。
 
 #### D.2 暗线二：`store_process` 的调用时机是稳定性关键
 
-代码里明确注释“在首次 yield 等待前持久化 live session”，这行注释背后是一次典型的并发回收竞态修复经验：如果不提前存储，turn 被中断会直接 drop 最后引用导致后台进程被误杀。
+代码里明确注释“在首次 yield 等待前持久化 live session”，这行注释背后可以推测对应一次并发回收竞态修复经验：如果不提前存储，turn 被中断会直接 drop 最后引用导致后台进程被误杀。
 
 ```rust
 // codex-rs/core/src/unified_exec/process_manager.rs:413
@@ -877,13 +889,13 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 2. `ExecCommandToolOutput.raw_output` 的响应快照（可消费）  
 3. `HeadTailBuffer` 的进程级保留（可续轮）  
 
-排障时如果不先区分这三层，很容易出现“日志里看见了，响应里没看到”或“响应里看见了，后续轮询没看到”的误判。
+排障时如果不先区分这三层，容易出现“日志里看见了，响应里没看到”或“响应里看见了，后续轮询没看到”的误判。
 
 #### D.4 暗线四：网络审批 deferred 模式是“先执行后仲裁”
 
-`NetworkApprovalMode::Deferred` 意味着系统允许命令先在当前边界启动，再在网络触发点进行审批。拒绝后由异步路径终止进程。这不是妥协，而是把“启动时延”和“风险控制”分离，优化可用性。
+`NetworkApprovalMode::Deferred` 意味着系统允许命令先在当前边界启动，再在网络触发点进行审批。拒绝后由异步路径终止进程。这一取向可以理解为把“启动时延”和“风险控制”分离，优先保证可用性。
 
-### E. 风险层复盘：8 个高频“看起来像 bug，实际是设计结果”的现象
+### E. 风险层复盘：8 个“看起来像 bug，实际是设计结果”的现象
 
 1. **空轮询等待长**：因为 `MIN_EMPTY_YIELD_TIME_MS=5000`，不是卡死。  
 2. **命令摘要退化成 Unknown**：因为有 unknown 即全局降级。  
@@ -894,7 +906,7 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 7. **zsh-fork 在远程不可用**：设计硬限制，不是临时故障。  
 8. **sandbox denied 文案不稳定**：启发式关键词判定决定了文本依赖。
 
-这些现象如果提前被团队认知，故障工单会显著减少。
+这些现象如果提前被团队认知，故障工单往往能显著减少。
 
 ### F. 竞品层复盘：同题不同解的工程取舍
 
@@ -903,31 +915,31 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 - **规则优先型**：强调 hooks/permissions 组合；
 - **交互优先型**：强调 ask/allow 节奏与用户体验；
 - **外部隔离优先型**：强调容器或 wrapper；
-- **运行时统一型**（Codex）：把策略、审批、进程状态、事件统一到一个执行模型。
+- **运行时统一型**（Codex 较为接近）：把策略、审批、进程状态、事件统一到一个执行模型。
 
-没有绝对优劣，关键看目标：  
-如果主要是一次性代码修改，规则优先模型足够；  
-如果目标是长时自治任务，运行时统一模型的优势会越来越明显。
+不能简单说谁优劣，关键看目标：  
+如果主要是一次性代码修改，规则优先模型一般就够用；  
+如果目标是长时自治任务，运行时统一模型的可控性体感会更明显。
 
-### G. 缺陷层复盘：未来三条最值得投入的演进线
+### G. 缺陷层复盘：未来值得考虑的几条演进线
 
 #### G.1 更结构化的拒绝与失败语义
 
-目前大量失败信息仍通过字符串传播。建议引入稳定错误码分层（policy_reject / sandbox_deny / network_defer_cancel / process_pruned / io_truncated），便于平台化观测与 A/B 调优。
+目前不少失败信息仍通过字符串传播。可以考虑引入稳定错误码分层（policy_reject / sandbox_deny / network_defer_cancel / process_pruned / io_truncated），便于平台化观测与 A/B 调优。
 
 #### G.2 更可学习的规则建议系统
 
-当前 amendment 仍偏“静态前缀提案”。可以考虑引入“会话内成功执行频次 + 风险标签 + 工作区范围”联合评分，自动生成更保守但更实用的建议。
+当前 amendment 仍偏“静态前缀提案”。一种可能的演进是引入“会话内成功执行频次 + 风险标签 + 工作区范围”联合评分，自动生成更保守但更实用的建议。
 
 #### G.3 面向长任务的进程优先级管理
 
-64 上限 + LRU 保护是合理默认，但对复杂自治流还不够。未来可做：
+64 上限 + LRU 保护是合理默认，但对复杂自治流可能不够。未来可考虑：
 
 - pin/unpin 进程；
 - 按进程类型（watcher、test、repl）分级；
 - 对被 prune 进程发显式诊断事件而非静默淘汰。
 
-### H. 三个真实链路推演（从源码逻辑到用户感知）
+### H. 三个典型链路推演（从源码逻辑到用户感知）
 
 #### H.1 链路一：启动长测试 + 空轮询
 
@@ -953,23 +965,23 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 2. **改审批逻辑要串读 3 处**：`exec_policy.rs`、`unified_exec runtime`、`session/handlers.rs`。  
 3. **改进程回收策略要压测并发边界**：至少验证 64+ 进程与交互轮询混合场景。  
 4. **改输出逻辑时区分“展示层”和“返回层”**：不要把 event 输出当作 response 完整性证明。  
-5. **改 escalation 必做 FD 一致性检查**：否则会出现隐性 IO 串线。
+5. **改 escalation 必做 FD 一致性检查**：否则可能出现隐性 IO 串线。
 
 ### J. 扩展结论
 
-如果从源码工程角度给本章一个终极判断：`unified_exec` 是 Codex 把“命令调用能力”升级为“可治理执行系统”的分水岭。它的复杂度不是偶然堆积，而是目标函数变化后的必然代价。  
+从源码工程角度给本章一个综合判断：`unified_exec` 可以理解为 Codex 把“命令调用能力”升级为“可治理执行系统”的一个分水岭节点。它的复杂度并非偶然堆积，而是目标函数变化后的合理代价。  
 
-过去我们评估命令执行，关注的是“能不能执行”；  
-在 `unified_exec` 之后，评估标准变成了四个同时成立：
+过去我们评估命令执行，关注的常常是“能不能执行”；  
+在 `unified_exec` 之后，评估标准更接近四点同时成立：
 
 - 能不能执行；
 - 谁批准执行；
 - 在什么边界执行；
 - 执行之后如何持续纳入会话状态与审计链路。
 
-这四点一起成立，才是长时自治编码代理可落地的前提条件。
+这四点一起成立，更可能成为长时自治编码代理可落地的前提条件。
 
-## 附：实现路径逐步推演（超详细版）
+## 附：实现路径逐步推演（详细版）
 
 这一节按“真实一次调用”的顺序，给出从模型发起 `exec_command` 到 turn 结束、再到后台清理的完整推演。与前文不同，这里强调“每一步的输入输出是什么、失败点在哪里、系统如何恢复”。
 
@@ -977,7 +989,7 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 
 模型先产出 `exec_command` 参数（`cmd/workdir/login/tty/...`）。此时系统面对的第一个风险不是命令本身，而是**参数语义歧义**：例如模型把 shell 运算符错误当成普通 argv 字符串、把 `login=true` 与配置约束冲突、或者提交了错误的 `additional_permissions` 结构。
 
-因此入口层先做参数解析与规范化，而不是立刻执行。这个顺序保证了“错误越早被发现，恢复成本越低”。如果参数级失败，系统会在模型回合内给出可解释错误，而不是在 OS 执行层抛出难读异常。
+因此入口层先做参数解析与规范化，而不是立刻执行。这个顺序的好处是“错误越早被发现，恢复成本越低”。如果参数级失败，系统会在模型回合内给出可解释错误，而不是在 OS 执行层抛出难读异常。
 
 ### Step 2：分配 `process_id`，建立运行标识
 
@@ -995,11 +1007,11 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 
 系统会把 turn 级授予权限与本次请求权限合并，形成 `effective_additional_permissions`。  
 
-随后会检查一个很关键的约束：当当前审批策略不允许请求升级权限时，必须拒绝这次提权请求。这个拒绝发生在执行前，可以避免“先运行后回滚”的高风险路径。
+随后会检查一个比较关键的约束：当当前审批策略不允许请求升级权限时，必须拒绝这次提权请求。这个拒绝发生在执行前，可以避免“先运行后回滚”的高风险路径。
 
 ### Step 5：构造 Approval Key，命中或发起审批
 
-`UnifiedExecApprovalKey` 组合了 canonical command、cwd、tty、sandbox 权限与 additional permissions。这里的 canonicalization 不是表面去空格，而是为了减少语义等价命令的重复审批弹窗。
+`UnifiedExecApprovalKey` 组合了 canonical command、cwd、tty、sandbox 权限与 additional permissions。这里的 canonicalization 不是表面去空格，更接近“减少语义等价命令的重复审批弹窗”这一意图。
 
 若 key 命中缓存，可直接沿用先前审批结果；未命中则请求审批。这样在长任务里可以明显减少“同命令反复确认”的交互噪声。
 
@@ -1011,7 +1023,7 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 - 如果只能 complex fallback，标记 `used_complex_parsing=true`；
 - 最终由 `render_decision_for_unmatched_command` 在 safelist / dangerous / approval policy / sandbox context 下给出决策。
 
-这一步最有价值的地方在于：它不会把不确定命令“伪装成确定安全”，而是把不确定性交给 Prompt 或 Forbidden 分支处理。
+这一步比较有价值的地方在于：它不会把不确定命令“伪装成确定安全”，而是把不确定性交给 Prompt 或 Forbidden 分支处理。
 
 ### Step 7：Runtime 组装 sandbox 执行请求
 
@@ -1019,7 +1031,7 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 
 如果启用了受管网络，会把网络代理参数注入环境；如果是 PowerShell 且在特定 sandbox 级别，会走 profile 关闭逻辑；如果是 `ZshFork` 且远程环境，会直接拒绝。  
 
-这一步体现了 Codex 的“执行前重写”策略：尽可能在 spawn 前把边界与副作用约束清楚，而不是 spawn 后靠字符串猜测。
+这一步体现了 Codex 的“执行前重写”取向：尽可能在 spawn 前把边界与副作用约束清楚，而不是 spawn 后靠字符串猜测。
 
 ### Step 8：`open_session_with_exec_env` 启动进程并接管输出
 
@@ -1035,7 +1047,7 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 
 ### Step 10：活进程先持久化，再做首轮输出采样
 
-前文提过，这一步是为竞态修复而存在。其效果是：即便 turn 在启动后很快被中断，后台进程也不会因为 Arc 引用链断裂而被误杀。
+前文提过，这一步可以视为对竞态问题的修复。其效果是：即便 turn 在启动后很快被中断，后台进程也不会因为 Arc 引用链断裂而被误杀。
 
 换句话说，系统显式把“启动成功”与“首轮采样完成”拆开了，这是长任务稳定性的关键差别。
 
@@ -1046,7 +1058,7 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 1. **进程仍活着**：返回 `process_id`，后续靠 `write_stdin` 继续交互；
 2. **短命令已退出**：立刻返回 exit_code 并释放 ID。
 
-这两类统一在同一 API 下，调用侧无需区分“短命令接口”和“长命令接口”，降低模型工具使用复杂度。
+这两类统一在同一 API 下，调用侧无需区分“短命令接口”和“长命令接口”，可降低模型工具使用复杂度。
 
 ### Step 12：`write_stdin` 续写或轮询
 
@@ -1056,7 +1068,7 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 - 若 `chars` 为空，视为后台 poll，按 `MIN_EMPTY_YIELD_TIME_MS` 下限等待；
 - 无论写入还是轮询，都会再走一次输出采样并构造 chunk 返回。
 
-这里的设计让一个接口同时覆盖“主动输入”和“被动读输出”两种交互模式。
+这种设计让一个接口同时覆盖“主动输入”和“被动读输出”两种交互模式。
 
 ### Step 13：延迟网络拒绝与失败传播
 
@@ -1074,7 +1086,7 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 
 即便模型输出流 completed，只要工具输出标记需要后续推进，turn 仍可继续。这确保长流程不会被“模型流事件”过早截断。  
 
-这也是 `unified_exec` 能在多轮持续执行中保持状态一致的关键点。
+这也是 `unified_exec` 能在多轮持续执行中保持状态一致的关键点之一。
 
 ### Step 16：显式清理与会话 shutdown 收口
 
@@ -1093,7 +1105,7 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 - 优先淘汰“已退出且最久未使用”；
 - 再淘汰未保护的最久未使用。
 
-这个策略平衡了活跃交互与资源约束，但并不等于“永不误伤”。高并发自动化场景仍建议结合业务层做进程管理。
+这个策略在活跃交互与资源约束之间做了权衡，但并不等于“永不误伤”。高并发自动化场景仍建议结合业务层做进程管理。
 
 ### Step 18：Unix escalation 在何时介入
 
@@ -1105,17 +1117,17 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 4. server 侧 `prepare_escalated_exec` 并执行；
 5. 返回 `SuperExecResult`。
 
-这里的重点是“协议化”而非“命令替换”，因此可审计性更强。
+这里的重点是“协议化”而非“命令替换”，可审计性相对更强。
 
 ### Step 19：为什么这套设计适合长时自治任务
 
-当任务持续数十分钟到数小时，传统“短命令 + 人工串联”会出现三类问题：
+当任务持续数十分钟到数小时，传统“短命令 + 人工串联”可能会出现三类问题：
 
 - 上下文丢失：每次命令都像全新请求；
 - 权限漂移：不同回合审批语义不一致；
 - 观测断裂：输出在多个通道中不可追踪。
 
-`unified_exec` 通过 process_id、approval key、统一事件流和统一清理路径，正好对齐这三类问题。
+`unified_exec` 通过 process_id、approval key、统一事件流和统一清理路径，正好可以对齐这三类问题。
 
 ### Step 20：对维护者最有价值的实务建议
 
@@ -1189,28 +1201,28 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 
 ### 这一节的归纳
 
-从工程复盘角度，`unified_exec` 最重要的不是某个函数写得多巧，而是它把“策略、执行、状态、观测、回收”五件事收敛到了同一套约束模型中。  
+从工程复盘角度看，`unified_exec` 一个比较显著的特点是：它把“策略、执行、状态、观测、回收”五件事收敛到了同一套约束模型中。  
 
-当你维护这条链路时，最容易犯的错误是只改其中一个点（例如 parser 或 approval）而忽略其余四个点的联动后果。真正可靠的变更方式永远是“链路视角”：看完整路径，再动局部实现。
+当你维护这条链路时，最容易犯的错误是只改其中一个点（例如 parser 或 approval）而忽略其余四个点的联动后果。更可靠的变更方式通常是“链路视角”：看完整路径，再动局部实现。
 
 ## 附：命令执行治理方法论（长期维护指南）
 
-如果把 `unified_exec` 放到“长期维护”语境里，它实际上对应一个更大的命题：**如何在 AI 代理持续自治时，保持命令执行的可控性与可恢复性**。本节给出一套可落地的方法论，帮助后续章节（甚至其他项目）复用。
+如果把 `unified_exec` 放到“长期维护”语境里，它实际上对应一个更大的命题：**如何在 AI 代理持续自治时，保持命令执行的可控性与可恢复性**。本节给出一套可参考的方法论，便于其他章节甚至其他项目复用。需要说明：方法论部分属于工程经验类总结，相比源码事实，置信度更偏“可辩护建议”而非“必然结论”。
 
 ### 方法一：把需求拆成四层，而不是一个“执行命令”需求
 
-很多团队在需求文档里只写“支持运行命令并回传结果”，这会直接导致实现偏短命令思维。更合理的拆法是四层：
+很多团队在需求文档里只写“支持运行命令并回传结果”，可能直接导致实现偏短命令思维。更合理的拆法是四层：
 
 1. **表达层**：模型如何表达命令意图（字符串、结构化参数、上下文路径）。  
 2. **决策层**：系统如何判定是否执行（policy、approval、dangerous heuristic）。  
 3. **执行层**：系统如何执行（sandbox、network、spawn、escalation）。  
 4. **运行层**：执行后如何持续管理（process state、poll、回收、观测）。  
 
-`unified_exec` 最大价值正是把四层明确拆开并建立连接。如果后续扩展功能（例如多进程并行、跨环境迁移）依然遵循这四层，系统复杂度会更可控。
+`unified_exec` 一个比较有借鉴价值的地方，正是把四层明确拆开并建立连接。如果后续扩展功能（例如多进程并行、跨环境迁移）依然遵循这四层，系统复杂度可能更可控。
 
-### 方法二：变更评审必须做“跨层影响检查”
+### 方法二：变更评审要做“跨层影响检查”
 
-在此类系统里，单层改动几乎都会跨层传导。推荐在代码评审里强制回答以下问题：
+在此类系统里，单层改动几乎都会跨层传导。建议在代码评审里逐项回答：
 
 1. 这次改动会影响 approval key 吗？  
 2. 会改变 execpolicy 的命中集合吗？  
@@ -1223,11 +1235,11 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 9. 会改变 sandbox denied 文案来源吗？  
 10. 会影响远程环境与本地环境的一致性吗？
 
-如果其中任何一项回答不清楚，通常说明改动范围尚未被充分理解。
+如果其中任何一项回答不清楚，往往说明改动范围尚未被充分理解。
 
-### 方法三：测试矩阵要覆盖“组合爆炸”，不能只测 happy path
+### 方法三：测试矩阵覆盖“组合维度”，不只是 happy path
 
-`unified_exec` 的风险点在组合，而非单点。建议最小矩阵包含以下维度：
+`unified_exec` 的风险点往往在组合，而非单点。建议最小矩阵包含以下维度：
 
 - shell_mode：Direct / ZshFork  
 - environment：Local / Remote  
@@ -1238,7 +1250,7 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 - network：none / managed / deferred approval deny  
 - lifecycle：normal finish / user interrupt / shutdown / prune
 
-即使每维只取 2 个值，也会产生大量组合。实践中可以采用“核心组合全量 + 边缘组合抽样 + 回归故障复现集”三层策略。这样既不至于测试成本失控，也能守住主路径稳定性。
+即使每维只取 2 个值，也会产生大量组合。实践中可以采用“核心组合全量 + 边缘组合抽样 + 回归故障复现集”三层策略，以平衡测试成本与稳定性。
 
 ### 方法四：为“可观察性”设计稳定字段，不依赖日志文本
 
@@ -1253,9 +1265,9 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 - `output_truncation_applied`  
 - `escalation_action`（run/escalate/deny）
 
-有了这些字段，才能回答“失败率升高是 parser 抖动、策略变化还是环境问题”这类运维关键问题。
+有了这些字段，更容易回答“失败率升高是 parser 抖动、策略变化还是环境问题”这类运维问题。
 
-### 方法五：把“恢复策略”当作一等能力，而不是失败后的补丁
+### 方法五：把“恢复策略”当作一等能力
 
 在长时任务里，失败不可避免。真正决定可用性的不是“有没有失败”，而是“失败后是否可恢复”。  
 
@@ -1266,11 +1278,11 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 3. **状态恢复**：进程异常终止时及时释放 ID，避免资源泄漏；  
 4. **会话恢复**：shutdown 后保证无僵尸进程，下一会话干净启动。  
 
-这也是为什么 “release_process_id + terminate_all_processes + shutdown cleanup” 必须被视为主功能，而不是边缘清理代码。
+这也解释了为什么 `release_process_id + terminate_all_processes + shutdown cleanup` 在源码上被作为主功能维护，而不是边缘清理代码。
 
 ### 方法六：风险分级要与用户心智一致
 
-很多代理系统做了复杂风险评估，但用户感知仍然混乱，根因是分级语言不一致。建议统一成用户可理解的三档：
+很多代理系统做了复杂风险评估，但用户感知仍然混乱，根因常常是分级语言不一致。建议统一成用户可理解的三档：
 
 - **低风险**：只读、工作区内、安全命令，默认可自动执行；  
 - **中风险**：可能改动状态但可回滚，需按策略确认；  
@@ -1289,11 +1301,11 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 - 修复 commit；  
 - 回归测试链接。  
 
-长期维护中，这个样本库比抽象规范更有价值，因为它直接绑定真实故障模式。
+长期维护中，这个样本库通常比抽象规范更有价值，因为它直接绑定真实故障模式。
 
 ### 方法八：团队协作时明确“策略改动”和“执行改动”的职责边界
 
-在多人协作中最容易出现的问题是：A 修改策略，B 修改执行，二者各自合理，组合后回归。  
+在多人协作中比较容易出现的问题是：A 修改策略，B 修改执行，二者各自合理，组合后回归。  
 
 建议把职责拆成两类 owner：
 
@@ -1324,7 +1336,7 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 - 支持更细粒度策略建议生成；
 - 评估跨平台 escalation 一致性基线。
 
-这种分阶段推进可以避免“同时追求功能、体验、安全、治理”导致的失焦。
+这种分阶段推进可以减少“同时追求功能、体验、安全、治理”导致的失焦。
 
 ### 方法十：给使用者的实践建议
 
@@ -1339,12 +1351,12 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 
 ### 方法论小结
 
-`unified_exec` 给我们的核心启示是：AI 代理时代的命令执行系统，不再是 shell 包装器，而是治理系统。  
+`unified_exec` 给到的一个核心启示是：AI 代理时代的命令执行系统，可能不再适合按 shell 包装器去构建，而更接近一个治理子系统。  
 
-治理系统的评判标准也随之变化：  
-不是“执行成功率”一项，而是“成功率 + 可解释性 + 可恢复性 + 可观测性 + 可演进性”的组合。  
+治理子系统的评判标准也随之变化：  
+不只是“执行成功率”一项，而是“成功率 + 可解释性 + 可恢复性 + 可观测性 + 可演进性”的组合。  
 
-当你用这套标准回看 `unified_exec` 的设计，会发现很多看似“啰嗦”的逻辑（比如多层策略、状态持久化、统一事件、冗余清理）其实都非常必要。它们共同保证了一个事实：命令执行不只是能跑，还要在长期自治中**跑得稳、跑得明白、跑得可控**。
+当你用这套标准回看 `unified_exec` 的设计，会发现很多看似“啰嗦”的逻辑（比如多层策略、状态持久化、统一事件、冗余清理）其实都有它的位置。它们共同保证了一个事实：命令执行不只是能跑，还要在长期自治中**跑得稳、跑得明白、跑得可控**。
 
 ## 附：源码证据索引与阅读路径建议
 
@@ -1370,7 +1382,7 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 - **策略决策层**：`exec_policy` 三态决策；  
 - **执行边界层**：`sandbox` 与 `escalation`。  
 
-很多争论来自把三层混为一层：有人把 parser 当 policy，有人把 sandbox 当审批。源码结构清楚地告诉我们：这三层各司其职，且必须叠加。
+很多争论来自把三层混为一层：有人把 parser 当 policy，有人把 sandbox 当审批。源码结构清楚地告诉我们：这三层各司其职，且更适合叠加而非互替。
 
 ### 问题 3：为什么有些命令“看起来安全”还会提示？
 
@@ -1393,7 +1405,7 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 
 看 `head_tail_buffer.rs` 即可。它明确采用“保头保尾、丢中间”策略。  
 
-这在代理系统中是合理的内存防御：比起 OOM，保留最具诊断价值的前后文更可取。但副作用是中间错误行可能丢失，所以高价值任务应考虑落盘完整日志。
+这在代理系统中可以视为一种合理的内存防御：比起 OOM，保留最具诊断价值的前后文更可取。但副作用是中间错误行可能丢失，所以高价值任务应考虑落盘完整日志。
 
 ### 问题 6：如何快速定位“是策略问题还是执行问题”？
 
@@ -1431,7 +1443,7 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 ### 问题 9：如何理解 `shell-escalation` 的价值？
 
 如果只看功能，你会觉得它只是“允许升权执行”。  
-如果看协议设计，它的核心价值是把越权路径纳入可审计通道：请求、决策、FD 转发、执行结果都有明确消息边界。  
+如果看协议设计，它的一个重要价值是把越权路径纳入可审计通道：请求、决策、FD 转发、执行结果都有明确消息边界。  
 
 这对企业场景尤其关键，因为审计和复盘通常比“临时跑通命令”更重要。
 
@@ -1446,18 +1458,18 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 -> `tools/events`（可观测）  
 -> `session handlers + tasks`（生命周期收口）  
 
-当你能把这条链路在脑中走通，`unified_exec` 基本就真正掌握了。
+当你能把这条链路在脑中走通，`unified_exec` 基本就掌握得差不多了。
 
 ## 附：术语与误解澄清（便于跨章节对齐）
 
-为了避免后续章节出现术语漂移，这里把本章高频概念做一次统一定义，并附上最常见误解。
+为了避免后续章节出现术语漂移，这里把本章高频概念做一次统一定义，并附上常见误解。
 
 ### 1. “审批”不等于“沙箱”
 
 审批（approval）是“是否需要人或 reviewer 同意”；  
 沙箱（sandbox）是“即使执行，也被限制到什么边界”。  
 
-两者是并联关系，不是替代关系。你可以无审批但强沙箱，也可以高审批但弱沙箱；真正稳妥的做法是两者协同。
+两者是并联关系，不是替代关系。可以无审批但强沙箱，也可以高审批但弱沙箱；更稳妥的做法通常是两者协同。
 
 ### 2. “已批准”不等于“永远放行”
 
@@ -1468,7 +1480,7 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 ### 3. “未知命令”不等于“危险命令”
 
 `Unknown` 代表解析器无法稳定抽象语义，不代表命令一定危险。  
-系统通常会在未知情况下选择更保守的审批/策略路径，这是风险控制策略，而非价值判断。
+系统通常会在未知情况下选择更保守的审批/策略路径，这属于风险控制策略，而非价值判断。
 
 ### 4. “命令失败”不等于“系统失败”
 
@@ -1507,10 +1519,10 @@ execpolicy 的 allow 规则是效率工具，不是风险消除器。
 
 ### 10. “能跑起来”不是本章完成标准
 
-本章真正标准是：  
+本章关注的完整标准是：  
 **能跑 + 可解释 + 可审计 + 可恢复 + 可维护**。  
 
-只有同时满足这五项，`unified_exec` 才算真正完成了从“功能模块”到“执行系统”的升级。
+只有同时满足这五项，`unified_exec` 才更接近从“功能模块”到“执行系统”的升级。
 
 补充一句实践层建议：在团队落地时，最好把本章提到的策略参数、审批模式、默认沙箱和规则文件样例固化到仓库内文档，并配一份最小可执行的演练脚本。这样新成员不会把命令系统当黑盒，也能在出现故障时快速按章节路径定位问题，减少“经验依赖型排障”。
 再补一条：每次升级 Codex 版本后都应重跑一次命令执行回归套件，重点覆盖审批、沙箱、长进程轮询与回收四条主链路，避免配置默认值变化引入隐蔽行为漂移。
@@ -1518,6 +1530,8 @@ execpolicy 的 allow 规则是效率工具，不是风险消除器。
 ---
 
 ## 关键量化汇总（可复核）
+
+以下数据通过 `wc -l`、`find`、`grep -c "^\s*#\[test\]"` 等命令脚本统计得出，复核时直接用相同命令即可。
 
 ### A. 核心文件规模
 
@@ -1548,7 +1562,7 @@ execpolicy 的 allow 规则是效率工具，不是风险消除器。
 - `ExecCommandRequest`：16 字段  
 - `ProcessEntry`：8 字段  
 - `ParsedCommand`：4 个变体  
-- `is_safe_command.rs` 测试：19 个；`parse_command.rs` 测试：79 个；`bash.rs` 测试：29 个  
+- `is_safe_command.rs` 中 `#[test]`：19 个；`parse_command.rs`：79 个；`bash.rs`：29 个  
 - `UNSAFE_FIND_OPTIONS`：9 项  
 - `UNSAFE_RIPGREP_OPTIONS_WITH_ARGS`：2 项  
 - `UNSAFE_GIT_GLOBAL_OPTIONS`：18 项  
@@ -1558,15 +1572,14 @@ execpolicy 的 allow 规则是效率工具，不是风险消除器。
 
 ## 小结
 
-`unified_exec` 的真正价值，不在“能运行命令”，而在“把命令运行变成可治理的状态机”：它让命令在 Codex 内部拥有与消息同等级的生命周期语义，能被审批、被策略推导、被沙箱约束、被事件系统观察、被会话系统清理。  
+回到源码事实层：`unified_exec` 的价值不在“能运行命令”这一点，而在“把命令运行抽象为可治理的状态机”。从源码可以观察到：命令在 Codex 内部拥有与消息相近的生命周期语义，能被审批、被策略推导、被沙箱约束、被事件系统观察、被会话系统清理。
 
-这套设计的关键工程权衡是：**用复杂度换一致性**。  
+这套设计有一个比较明显的工程权衡：**用复杂度换一致性**。  
 - 复杂度体现在 parser、policy、runtime、process manager 的多层协同；  
 - 一致性体现在同一命令无论短跑还是长跑，都走相同的信任边界与观测通道。  
 
-对读者而言，最值得带走的结论是三条：
+对读者而言，比较值得带走的结论是三条：
 
-1. **命令执行是 Codex 的“系统能力”，不是工具能力。**  
-2. **安全性来自“策略+沙箱+生命周期管理”的组合，而非任一单点。**  
+1. **命令执行更接近 Codex 的“系统能力”，而不是“工具能力”。**  
+2. **安全性来自“策略 + 沙箱 + 生命周期管理”的组合，而非任一单点。**  
 3. **未来优化空间主要在可维护性（解析复杂度）、可配置性（规则体验）与可预测性（启发式误差）上。**
-
