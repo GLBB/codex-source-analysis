@@ -2,6 +2,14 @@
 
 > 这份研究覆盖 OpenAI Codex CLI / Rust 主体 / TS+Python SDK 全貌：**2 篇总纲 + 25 章正文 + 3 个附录**，约 **51 万中文字 / 1.5 MB Markdown** 与 **149 张 Mermaid 架构图**。
 
+## 系列研究
+
+本研究是 AI Agent / Coding Harness 源码深度研究系列的一部分，姊妹篇：
+
+- [Claude Code 源码解析](https://github.com/xiaonancs/claude-code-source-analysis) — Anthropic Claude Code v2.1.88 完整 Agent Harness 拆解（30 篇 / 23 个子系统 / 179 张架构图）
+- [Hermes Agent 深度研究](https://github.com/xiaonancs/hermes-agent-study) — Hermes Agent + 4 个同源/对比项目（OpenClaw / EvoMap / OpenHarness / JiuwenClaw），含抄袭分析（38 篇 / 32 章 / 97 张架构图）
+- [OpenClaw 源码深度研究](https://github.com/xiaonancs/openclaw-study) — 358k Stars OpenClaw v2026.4.15 源码 + 23k commits + 生态调研
+
 ## 引言
 
 OpenAI Codex 在 2025–2026 年从一个早期 TS 原型重写为以 Rust 为主体的多入口 harness：
@@ -144,11 +152,6 @@ npm run validate:mermaid
 ```
 
 每章遵循"七维分析框架"：本质 → 核心痛点 → 解决思路 → 实现细节 → 易错点 → 竞品对比 → 仍存缺陷。
-
-## 同作者前作
-
-- [Claude Code Source Analysis](https://github.com/xiaonancs/claude-code-source-analysis)
-- [Hermes Agent Study](https://github.com/xiaonancs/hermes-agent-study)
 
 ## 许可
 
