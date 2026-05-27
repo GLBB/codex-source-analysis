@@ -11,8 +11,6 @@
 | `ThreadManager` | `codex-rs/core/src/thread_manager.rs` | 线程创建 / fork / resume |
 | `TurnContext` | `codex-rs/core/src/session/mod.rs` | turn 内共享的引用与状态 |
 
-> 本附录在生成 25 章正文后自动补全（参见 Phase 6）；当前仅给出索引骨架。
-
 ## B.2 Tools
 
 | 名称 | 路径 | 用途 |

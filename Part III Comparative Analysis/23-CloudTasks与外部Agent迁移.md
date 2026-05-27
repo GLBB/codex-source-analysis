@@ -47,10 +47,10 @@
 
 ### 2.1 一张图先把边界拉清
 
-<div style="background: #ffffff !important; background-color: #ffffff !important; border: 1px solid #d0d7de; border-radius: 8px; padding: 16px; margin: 16px 0; overflow-x: auto;" bgcolor="#ffffff">
+<div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme": "base", "themeCSS": "svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, text { color: #000000 !important; fill: #000000 !important; }", "themeVariables": {"background": "#ffffff", "mainBkg": "#ffffff", "primaryColor": "#f5f5f5", "primaryTextColor": "#000000", "primaryBorderColor": "#333333", "secondaryColor": "#f6f8fa", "tertiaryColor": "#ffffff", "lineColor": "#444444", "textColor": "#000000", "nodeBorder": "#333333", "clusterBkg": "#fafafa", "clusterBorder": "#888888", "edgeLabelBackground": "#ffffff", "fontFamily": "Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart TD
     User["开发者 (CLI / TUI)"]
     subgraph LocalRuntime["Codex 本地运行时"]
@@ -121,7 +121,7 @@ flowchart TD
 
 ### 2.4 三个面之间为何刻意不耦合
 
-值得花一段澄清：`cloud-tasks`、`external-agent-*`、`agent-graph-store` 三个面**几乎不共享业务代码**——这是一个有意的设计决策，而不是"还没来得及统一"。
+值得花一段澄清：`cloud-tasks`、`external-agent-*`、`agent-graph-store` 三个面**几乎不共享业务代码**——这更像是一个有意收窄边界的设计结果，而不是"还没来得及统一"。
 
 - `cloud-tasks` 用的是 `codex-cloud-tasks-client::CloudBackend` trait + 自己的 ratatui 主循环；它不知道 `ThreadManager`、不知道 `AgentGraphStore`、不知道 `external-agent-sessions`。
 - `external-agent-migration` 完全是 sync 函数（读 / 写本地文件），不依赖 tokio 运行时；它不知道 `cloud-tasks`、不知道 `AgentGraphStore`。
@@ -171,31 +171,31 @@ flowchart TD
 - **可观测性边界**：需要把"父子关系查询"从"通用的 SQLite 查询"独立出来，便于上层做"只查 open 子代理"或"广度遍历后代"这种业务语义。
 - **API 演化空间**：未来如果要加 `Paused / Suspended / Failed` 状态、或者添加 `spawn_metadata` 字段，trait 边界比 SQLite 列演化更友好。
 
-`AgentGraphStore` trait 把这几件事一次性解决：trait 只暴露 4 个方法（upsert / set_status / list_children / list_descendants），实现者既可以是 `LocalAgentGraphStore`（SQLite），也可以是未来的 `RemoteAgentGraphStore`（gRPC），call site 不需要知道差异。这是经典的"hexagonal architecture / ports & adapters"模式，但落到 4 方法 + 2 状态的极简表面，显示出 OpenAI 工程团队对"先收口、再扩展"的偏好。
+`AgentGraphStore` trait 把这几件事一次性解决：trait 只暴露 4 个方法（upsert / set_status / list_children / list_descendants），实现者既可以是 `LocalAgentGraphStore`（SQLite），也可以是未来的 `RemoteAgentGraphStore`（gRPC），call site 不需要知道差异。这是经典的"hexagonal architecture / ports & adapters"模式，但落到 4 方法 + 2 状态的极简表面，可以理解为"先收口、再扩展"的工程取向。
 
 ---
 
 ## 四、解决思路与方案：架构、数据结构、关键算法
 
-在展开各子系统的具体实现前，先把"七维分析"里"解决思路"这一维的总体取向澄清：本章涉及的所有 crate 都遵循"窄抽象 + 严过滤 + 静态资源"三条线，没有任何一个 crate 采用了"灵活配置 + 运行时插件"路径。这是 OpenAI 在产品工程上的清晰审美——把"软扩展性"留给上层（app-server / SDK / TUI 主线），把"硬正确性"留给底层（migration / cloud-tasks-client / graph-store）。理解这一点之后，下面的具体方案就不会显得"为什么不再灵活一点"——因为灵活性故意被放在了别处。
+在展开各子系统的具体实现前，先把"七维分析"里"解决思路"这一维的总体取向澄清：本章涉及的所有 crate 都遵循"窄抽象 + 严过滤 + 静态资源"三条线，没有任何一个 crate 采用了"灵活配置 + 运行时插件"路径。这更像是 Codex 这组代码呈现出的产品工程取向——把"软扩展性"留给上层（app-server / SDK / TUI 主线），把"硬正确性"留给底层（migration / cloud-tasks-client / graph-store）。理解这一点之后，下面的具体方案就不会显得"为什么不再灵活一点"——因为灵活性被放在了别处。
 
 ### 4.1 cloud-tasks 的双层架构
 
 cloud-tasks 内部用的是一个非常清晰的"UI / 客户端 / HTTP"三明治结构。下面这张图把三层之间的契约和并发主线一起画出。
 
-<div style="background: #ffffff !important; background-color: #ffffff !important; border: 1px solid #d0d7de; border-radius: 8px; padding: 16px; margin: 16px 0; overflow-x: auto;" bgcolor="#ffffff">
+<div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme": "base", "themeCSS": "svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, text { color: #000000 !important; fill: #000000 !important; }", "themeVariables": {"background": "#ffffff", "mainBkg": "#ffffff", "primaryColor": "#f5f5f5", "primaryTextColor": "#000000", "primaryBorderColor": "#333333", "secondaryColor": "#f6f8fa", "tertiaryColor": "#ffffff", "lineColor": "#444444", "textColor": "#000000", "nodeBorder": "#333333", "clusterBkg": "#fafafa", "clusterBorder": "#888888", "edgeLabelBackground": "#ffffff", "fontFamily": "Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart LR
     subgraph UI["cloud-tasks crate (UI + 主循环)"]
-        AppState["app::App (24 字段)"]
+        AppState["app::App (21 字段)"]
         EventLoop["tokio::select main loop"]
         Render["ui::draw (ratatui)"]
         FrameCoalesce["frame coalescing"]
     end
     subgraph ClientTrait["cloud-tasks-client (语义层 trait)"]
-        CB["CloudBackend trait (9 methods)"]
+        CB["CloudBackend trait (10 methods)"]
         HttpImpl["HttpClient"]
         MockImpl["MockClient"]
     end
@@ -220,19 +220,19 @@ flowchart LR
 
 这一架构的核心设计点：
 
-- **`CloudBackend` trait 把"业务对象"暴露给 UI**：trait 只关心 "task summary、diff、messages、apply"（共 9 个方法，见 `cloud-tasks-client/src/api.rs:L133-L170`），不关心 HTTP 细节。这让 UI 完全用业务语义说话，并且在 debug 构建里可以通过 `CODEX_CLOUD_TASKS_MODE=mock` 切换到 `MockClient`（`lib.rs:L44-L60`）做端到端测试。
-- **`HttpClient` 把 trait 翻译成 REST**：它内部组合 `backend::Client` 并通过 4 个内部 namespace（`Tasks / Attempts / Apply` 等子模块，见 `cloud-tasks-client/src/http.rs:L51-L62`）组织 URL 构造逻辑。
+- **`CloudBackend` trait 把"业务对象"暴露给 UI**：trait 只关心 "task summary、diff、messages、apply"（共 10 个方法，见 `cloud-tasks-client/src/api.rs:L133-L170`），不关心 HTTP 细节。这让 UI 完全用业务语义说话，并且在 debug 构建里可以通过 `CODEX_CLOUD_TASKS_MODE=mock` 切换到 `MockClient`（`lib.rs:L44-L60`）做端到端测试。
+- **`HttpClient` 把 trait 翻译成 REST**：它内部组合 `backend::Client` 并通过 3 个内部 namespace（`Tasks / Attempts / Apply` 子模块，见 `cloud-tasks-client/src/http.rs:L51-L62`、`L391-L435`）组织 URL 构造逻辑。
 - **`backend::Client` 是底层 HTTP**：负责 PathStyle 切换、统一 header（UA / ChatGPT-Account-Id / fedramp 路由）、错误体打包。
-- **App 状态机有 24 个字段**：覆盖列表、选中下标、详情 overlay、环境过滤、apply modal、best-of modal、preflight inflight、apply inflight、list_generation 计数器等等（`app.rs:L46-L75`）。`list_generation` 是用来防止"过期请求覆盖新请求"的核心技巧——每次刷新前递增，回调里对比，不一致就丢弃。
+- **App 状态机有 21 个字段**：覆盖列表、选中下标、详情 overlay、环境过滤、apply modal、best-of modal、preflight inflight、apply inflight、list_generation 计数器等等（`app.rs:L46-L75`）。当前 `TasksLoaded` 回调主要依赖 `env_filter` 匹配来避免"过期请求覆盖当前过滤器"，`list_generation` 只在刷新路径上递增并清空后台协调状态。
 
 ### 4.2 cloud-tasks 启动期的三路并发预热
 
 第一次 `codex cloud` 启动时，主线程进入 ratatui 主循环之前会**同时**起 3 个 tokio 任务，确保用户最多等"网络 1 个 RTT"：
 
-<div style="background: #ffffff !important; background-color: #ffffff !important; border: 1px solid #d0d7de; border-radius: 8px; padding: 16px; margin: 16px 0; overflow-x: auto;" bgcolor="#ffffff">
+<div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme": "base", "themeCSS": "svg { background: #ffffff !important; } .label, .messageText, .loopText, .noteText, text { color: #000000 !important; fill: #000000 !important; }", "themeVariables": {"background": "#ffffff", "mainBkg": "#ffffff", "primaryColor": "#f5f5f5", "primaryTextColor": "#000000", "primaryBorderColor": "#333333", "lineColor": "#444444", "textColor": "#000000", "actorBkg": "#f5f5f5", "actorBorder": "#333333", "actorTextColor": "#000000", "actorLineColor": "#444444", "activationBkg": "#e8e8e8", "activationBorderColor": "#333333", "noteBkgColor": "#f0f0f0", "noteBorderColor": "#888888", "noteTextColor": "#000000", "signalColor": "#444444", "signalTextColor": "#000000", "fontFamily": "Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 sequenceDiagram
     participant User
     participant Main as run_main
@@ -264,7 +264,7 @@ sequenceDiagram
 - 同时 spawn 三个任务：`cloud-tasks/src/lib.rs:L824-L869`。
 - 用 `AppEvent` 通过 unbounded mpsc 把回调结果送回主循环：`L823`。
 - 用 `frame_tx` + `redraw_tx` 双 channel 做帧合并：`L876-L908`，避免多事件同帧多次绘制。
-- `env_filter` 一旦被 autodetect 成功填上，就会**重新 spawn 一次 load_tasks**，并把 `list_generation` 自增以丢弃上一次的结果（`L1044-L1090`）。
+- `env_filter` 一旦被 autodetect 成功填上，就会**重新 spawn 一次 load_tasks**；结果套用时依赖 `env_filter` 匹配，`list_generation` 只随刷新递增并清理后台协调状态（`L1044-L1090`）。
 
 这套设计在源码里只有 200 行左右，但把"启动期网络等待"这件事处理得相当贴心。
 
@@ -272,10 +272,10 @@ sequenceDiagram
 
 会话导入流程比配置迁移复杂得多，因为它必须做"扫描 → 去重 → 解析 → 翻译 → 落盘 → 登记"六步：
 
-<div style="background: #ffffff !important; background-color: #ffffff !important; border: 1px solid #d0d7de; border-radius: 8px; padding: 16px; margin: 16px 0; overflow-x: auto;" bgcolor="#ffffff">
+<div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme": "base", "themeCSS": "svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, text { color: #000000 !important; fill: #000000 !important; }", "themeVariables": {"background": "#ffffff", "mainBkg": "#ffffff", "primaryColor": "#f5f5f5", "primaryTextColor": "#000000", "primaryBorderColor": "#333333", "secondaryColor": "#f6f8fa", "tertiaryColor": "#ffffff", "lineColor": "#444444", "textColor": "#000000", "nodeBorder": "#333333", "clusterBkg": "#fafafa", "clusterBorder": "#888888", "edgeLabelBackground": "#ffffff", "fontFamily": "Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart TD
     Start["外部代理 home (例 ~/.claude)"]
     Scan["detect_recent_sessions: 遍历 projects/*/**.jsonl"]
@@ -306,10 +306,10 @@ flowchart TD
 
 配置迁移最大的复杂性在于"源格式与目标格式不是一一对应的"。下面这张流程图把"hooks / subagents / commands"三条主线一起列出：
 
-<div style="background: #ffffff !important; background-color: #ffffff !important; border: 1px solid #d0d7de; border-radius: 8px; padding: 16px; margin: 16px 0; overflow-x: auto;" bgcolor="#ffffff">
+<div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme": "base", "themeCSS": "svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, text { color: #000000 !important; fill: #000000 !important; }", "themeVariables": {"background": "#ffffff", "mainBkg": "#ffffff", "primaryColor": "#f5f5f5", "primaryTextColor": "#000000", "primaryBorderColor": "#333333", "secondaryColor": "#f6f8fa", "tertiaryColor": "#ffffff", "lineColor": "#444444", "textColor": "#000000", "nodeBorder": "#333333", "clusterBkg": "#fafafa", "clusterBorder": "#888888", "edgeLabelBackground": "#ffffff", "fontFamily": "Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart LR
     subgraph Source["外部代理目录 (.claude /  ~/.claude)"]
         Mcp[".mcp.json"]
@@ -347,7 +347,7 @@ flowchart LR
 - **Command 翻译**：source command 被加 `source-command-` 前缀转为 skill 目录，名字 ≤ 64 字符、描述 ≤ 1024 字符；body 中含 `$ARGUMENTS / $1 / {{ }} / !`` / @file` 任意一个就跳过（`L1181-L1190`）。
 - **术语改写**：所有迁移文本经过 `rewrite_external_agent_terms`，把"Claude"等术语全大小写不敏感地替换为 `Codex`，并把 `CLAUDE.md` 之类的文件名替换为 `AGENTS.md`（`L1298-L1308`）。
 
-值得稍微展开一下 `external-agent-migration` 与 `external-agent-sessions` 的协作关系：前者负责把"配置层"（hooks、agents、commands、MCP servers）搬过来，后者负责把"对话历史"搬过来。两者在 PR 历史上是分开演进的——`external-agent-migration` 早在 2025 末就有雏形，`external-agent-sessions` 直到 2026-04 才合入（PR #19895）；2026-04-29 又有 PR #20284 把 session 导入改为后台异步执行。这种"先配置、再会话、再异步"的演化节奏说明 OpenAI 团队对"迁移"这件事的优先级排序：先确保用户能继续工作（配置 + 工具），再补齐"历史记忆"（会话），最后才优化体验（异步、不阻塞 UI）。
+值得稍微展开一下 `external-agent-migration` 与 `external-agent-sessions` 的协作关系：前者负责把"配置层"（hooks、agents、commands、MCP servers）搬过来，后者负责把"对话历史"搬过来。两者在 PR 历史上是分开演进的——`external-agent-migration` 早在 2025 末就有雏形，`external-agent-sessions` 直到 2026-04 才合入（PR #19895）；2026-04-29 又有 PR #20284 把 session 导入改为后台异步执行。这种"先配置、再会话、再异步"的演化节奏，可能反映了 OpenAI 团队对"迁移"这件事的优先级排序：先确保用户能继续工作（配置 + 工具），再补齐"历史记忆"（会话），最后才优化体验（异步、不阻塞 UI）。
 
 读者如果对比 GitHub PR 历史，会发现 `external-agent-sessions` 在 4-5 月之间发生了多轮重构（commit `e48dcfd` 把 session 导出移出 app-server、`3bfdc15` 把 migration helpers 移到 config 之下、`a46f7e4` 把 session migration 移入独立 crate）。这种"频繁挪 module"通常意味着团队在寻找"配置 / 会话 / 协议" 三者之间的正确边界，最终落定在当前结构：`external-agent-migration` 处理配置层，`external-agent-sessions` 处理会话层，由 `app-server` 端拼装到一起。
 
@@ -355,10 +355,10 @@ flowchart LR
 
 `AgentGraphStore` 只有 4 个方法，但每个方法都有"必须保证稳定排序"的契约。下面用 ER 风格图说明 trait / 实现 / 持久层之间的关系，并把 ThreadSpawnEdgeStatus 的状态机也带出来。
 
-<div style="background: #ffffff !important; background-color: #ffffff !important; border: 1px solid #d0d7de; border-radius: 8px; padding: 16px; margin: 16px 0; overflow-x: auto;" bgcolor="#ffffff">
+<div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme": "base", "themeCSS": "svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, text { color: #000000 !important; fill: #000000 !important; }", "themeVariables": {"background": "#ffffff", "mainBkg": "#ffffff", "primaryColor": "#f5f5f5", "primaryTextColor": "#000000", "primaryBorderColor": "#333333", "secondaryColor": "#f6f8fa", "tertiaryColor": "#ffffff", "lineColor": "#444444", "textColor": "#000000", "nodeBorder": "#333333", "clusterBkg": "#fafafa", "clusterBorder": "#888888", "edgeLabelBackground": "#ffffff", "fontFamily": "Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart TD
     subgraph TraitLayer["agent-graph-store trait"]
         Trait["AgentGraphStore (4 methods)"]
@@ -396,10 +396,10 @@ flowchart TD
 
 ThreadSpawnEdgeStatus 的生命周期：
 
-<div style="background: #ffffff !important; background-color: #ffffff !important; border: 1px solid #d0d7de; border-radius: 8px; padding: 16px; margin: 16px 0; overflow-x: auto;" bgcolor="#ffffff">
+<div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme": "base", "themeCSS": "svg { background: #ffffff !important; } .label, text { color: #000000 !important; fill: #000000 !important; }", "themeVariables": {"background": "#ffffff", "mainBkg": "#ffffff", "primaryColor": "#f5f5f5", "primaryTextColor": "#000000", "primaryBorderColor": "#333333", "lineColor": "#444444", "textColor": "#000000", "fontFamily": "Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 stateDiagram-v2
     [*] --> Open: spawn 子 thread upsert edge
     Open --> Open: list_children / list_descendants 命中
@@ -416,7 +416,10 @@ stateDiagram-v2
 
 整个 crate 的 `src/lib.rs` 只有这 4 行：
 
-```4:4:codex-rs/collaboration-mode-templates/src/lib.rs
+```1:4:codex-rs/collaboration-mode-templates/src/lib.rs
+pub const PLAN: &str = include_str!("../templates/plan.md");
+pub const DEFAULT: &str = include_str!("../templates/default.md");
+pub const EXECUTE: &str = include_str!("../templates/execute.md");
 pub const PAIR_PROGRAMMING: &str = include_str!("../templates/pair_programming.md");
 ```
 
@@ -427,7 +430,7 @@ pub const PAIR_PROGRAMMING: &str = include_str!("../templates/pair_programming.m
 - **Default 模板（11 行）**只告诉模型"你处于默认模式，不要乱切换"，并强调"只在 `request_user_input` 在可用工具列表里时才使用它"——这是给"被嵌套到子代理"场景的兜底。
 - **Pair Programming 模板（7 行）**最短，因为它假定 prompt 上下文里已经有 `AGENTS.md` 与 hooks 等多重指引，只需要补一段"以同伴姿态、小步前进、按需提问"的语气定义。
 - **Execute 模板（45 行）**显著扩展，因为它要明确"假设优先 / 不要反复提问 / 长时段任务用 plan tool 报告进度"——这是 cloud-tasks 这种"开发者不在线"场景下最重要的模式。
-- **Plan 模板（128 行）**最长，因为 Plan 模式涉及三个明确阶段（grounding / intent chat / implementation chat），并需要严格区分"plan mode" 与 "update_plan tool" 这两个易混概念。它的长度并非冗余，而是产品语义的必然结果。
+- **Plan 模板（128 行）**最长，因为 Plan 模式涉及三个明确阶段（grounding / intent chat / implementation chat），并需要严格区分"plan mode" 与 "update_plan tool" 这两个易混概念。它的长度并非冗余，而是产品语义复杂度的直接结果。
 
 这种"模板长度反映模式复杂度"的取舍，本质上是把"产品决策固化为 Rust 资源"——任何想 fork Codex 加自己 Plan 模板的人，都必须改源码 + 重新编译，这正是 Codex 选择"开放代码可读 + 贡献流程收敛"治理模型的体现。
 
@@ -442,7 +445,7 @@ pub const PAIR_PROGRAMMING: &str = include_str!("../templates/pair_programming.m
 | 后端初始化与认证 | `cloud-tasks/src/lib.rs` | L43-L107 | 复用 codex-login，零二次登录 |
 | 启动期并发预热 | `cloud-tasks/src/lib.rs` | L824-L908 | 三路 spawn + frame coalescing |
 | Apply preflight 模态 | `cloud-tasks/src/lib.rs` | L614-L724 | 双 inflight 互斥 |
-| Trait → HTTP 委托 | `cloud-tasks-client/src/http.rs` | L23-L127 | 9 方法 + 4 namespace |
+| Trait → HTTP 委托 | `cloud-tasks-client/src/http.rs` | L23-L127, L391-L435 | 10 方法 + 3 namespace |
 | Path style 双轨 | `backend-client/src/client.rs` | L106-L114, L319-L416 | URL substring 判别 |
 | 会话扫描 | `external-agent-sessions/src/detect.rs` | L19-L88 | 30 天 + 50 上限 |
 | 会话翻译为 RolloutItem | `external-agent-sessions/src/export.rs` | L49-L130 | turn 状态机 + EXT marker |
@@ -598,7 +601,7 @@ fn token_count_item(response_items: &[ResponseItem]) -> RolloutItem {
 
 这种"忠实保留但加界限"的处理方式，比"全文本拼接"或"全丢弃"都更适合做"可读 + 可追溯"的导入历史。同时它也很好地处理了 Claude Code 在 2025 年下半年引入的 `thinking` 块——丢掉这部分内容是因为 thinking 是 Claude 内部状态，Codex 这边没有对等概念可以承接。
 
-### 5.8 agent-graph-store 的 BFS 后代遍历
+### 5.11 agent-graph-store 的 BFS 后代遍历
 
 `LocalAgentGraphStore` 把后代遍历委托给 `StateRuntime`：
 
@@ -635,7 +638,7 @@ fn token_count_item(response_items: &[ResponseItem]) -> RolloutItem {
 
 ### 6.1 cloud-tasks 这层最容易踩的坑
 
-1. **过期请求覆盖问题**：用户连按 `r` 刷新两次时，第一个回调可能在第二个请求发出后才到。`AppEvent::TasksLoaded` 的处理里通过 `env.as_deref() != app.env_filter.as_deref()` 与 `list_generation` 双重门控（`cloud-tasks/src/lib.rs:L954-L982`）丢弃过期结果。改这里时一定要保留两层判断，否则会引发 "filter 切换后短暂闪回旧内容"。这种"双层门控"在前端框架里通常被叫做"race-condition guard"，但在 Rust TUI 里很少见，因为大家更习惯于 `Arc<Mutex<u64>>` 模式。
+1. **过期请求覆盖问题**：用户连按 `r` 刷新两次时，第一个回调可能在第二个请求发出后才到。`AppEvent::TasksLoaded` 的处理里通过 `env.as_deref() != app.env_filter.as_deref()`（`cloud-tasks/src/lib.rs:L954-L982`）丢弃过滤器不匹配的结果。改这里时要保留这层判断，否则会引发 "filter 切换后短暂闪回旧内容"。这种门控在前端框架里通常被叫做"race-condition guard"，但在 Rust TUI 里很少见，因为大家更习惯于 `Arc<Mutex<u64>>` 模式。
 2. **`is_review` 任务的双面性**：list 里被过滤，但 details 里仍可访问。如果未来要做"review-only 浏览"，必须在 list 端引入开关，而不是直接放开 `filter`。
 3. **best-of-N 一定要走 `parse_attempts`**：CLI 参数与 best-of modal 里 attempts 必须共用同一个 `parse_attempts` 校验函数（`cli.rs:L52-L60`）。任何绕过它的入口都会让 backend 拒绝（`Err`）但 TUI 已经触发了 spinner。
 4. **`apply_inflight` / `apply_preflight_inflight` 互斥**：`spawn_preflight` 和 `spawn_apply` 都显式检查另一种 inflight 状态（`lib.rs:L622-L633` / `L683-L690`）。这是为了避免"preflight 还没回来，用户已经按了真 apply"。修改这部分时千万不要简化成单一 boolean。
@@ -643,7 +646,7 @@ fn token_count_item(response_items: &[ResponseItem]) -> RolloutItem {
 6. **`env_autodetect` 与 `env_filter` 的协调**：autodetect 成功后会主动把 `env_filter` 设到检测出的 id，并 spawn 第二次 load_tasks。如果用户已经手动选择 env_filter，autodetect 的结果会被忽略（`lib.rs:L1044-L1063` 的 `!= Some(sel.id.as_str())` 判断）。修改这里要小心：autodetect 不应抢用户手动选择。
 7. **`env_modal` / `apply_modal` / `best_of_modal` 不互斥**：三个 modal 都是独立 `Option`，源码并未在 `app::App` 层面做"同时只能有一个 modal"的约束。理论上可以同时弹出多个 modal——但实际 UI 渲染只画第一个。这是个设计上"隐式约束未显式表达"的例子，重构时容易踩坑。
 
-补充一条产品视角的提醒：Codex 主 TUI 也有自己的事件循环（`tui/src/app.rs` + `tui/src/tui.rs`），它的复杂度远高于 cloud-tasks 这套（PR #14018 提到主 TUI 的 chatwidget agent.rs 是 +3700 行的迁移）。为什么 cloud-tasks 不复用？最务实的解释是：cloud-tasks 不需要承载 multi-thread / multi-agent 状态，只需要"列表 + diff overlay + 模态弹窗"，重写一遍 ratatui 主循环比"在主 TUI 上加 cloud surface 分支"成本低。这是 OpenAI 工程团队在"工程债 vs 复用"之间倾向"代码独立"的一个典型选择。
+补充一条产品视角的提醒：Codex 主 TUI 也有自己的事件循环（`tui/src/app.rs` + `tui/src/tui.rs`），它的复杂度远高于 cloud-tasks 这套（PR #14018 提到主 TUI 的 chatwidget agent.rs 是 +3700 行的迁移）。为什么 cloud-tasks 不复用？最务实的解释是：cloud-tasks 不需要承载 multi-thread / multi-agent 状态，只需要"列表 + diff overlay + 模态弹窗"，重写一遍 ratatui 主循环比"在主 TUI 上加 cloud surface 分支"成本低。这可以理解为 OpenAI 工程团队在"工程债 vs 复用"之间倾向"代码独立"的一个选择。
 
 ### 6.2 external-agent-sessions 容易遗漏的边界
 
@@ -766,7 +769,7 @@ Cloud Tasks 与外部 Agent 迁移这两条线，在 Codex 这套架构里承担
 - **Cloud Tasks** 把"开发者跑在 ChatGPT 后端的远端任务"折射到了终端，并通过 trait 抽象 + 双 path style + dry-run apply + 启动期 3 路并发，把"云端代理体验"做成了"PR 工作流"。它的存在让 `codex cloud` 不再只是一个 URL 占位符，而是一个真正可以在终端里完成 review-diff-apply 闭环的 surface。
 - **External Agent Migration** + **External Agent Sessions** 把"从 Claude Code 等竞品搬家"从工具问题变成了数据迁移工程问题：MCP / hooks / agents / commands 通过白名单 + 拒绝列表过滤，会话通过 ledger sha256 + 30 天窗口去重；翻译过程中把 Anthropic 的 tool_use / tool_result 块翻译成 Codex 的 `RolloutItem` 流，并显式追加 EXTERNAL SESSION IMPORTED marker。
 - **Agent Graph Store** 把 multi-agent 派生拓扑从 SQLite 助手方法抽象成 4 方法 trait，配合 `ThreadSpawnEdgeStatus` 的 Open / Closed 双态状态机和稳定排序契约，为未来的远程实现和跨进程协调留出了边界。
-- **Collaboration Mode Templates** 仅用 4 行 Rust + 4 个 markdown 模板，把 Plan / Execute / Pair Programming / Default 四种协作模式固化为构建时资源，确保 prompt 与运行时绝对一致。
+- **Collaboration Mode Templates** 仅用 4 行 Rust + 4 个 markdown 模板，把 Plan / Execute / Pair Programming / Default 四种协作模式固化为构建时资源，确保 prompt 来自同一构建产物。
 
 如果说 Codex 主线（核心循环 + sandbox + tool system + protocol）解决的是"一次 turn 怎么跑得稳"，那么本章这几个 crate 解决的是"在云上 / 在外部 / 在多代理派生里，怎么跑得连续"。它们的代码量加起来只有约 1.1 万行，但每一行都坐在 Codex 与外部世界的契约边界上，决定了"开放生态可以走多远，又必须停在哪里"。
 

@@ -4,7 +4,7 @@
 
 在 Codex 的工程体系里，“命令执行”不是一个孤立功能，而是连接模型推理、权限审批、沙箱边界、实时事件流和会话生命周期的一条主链路。本章聚焦的 `unified_exec`，从源码可以观察到一个明显的取向：把“短命令执行”和“长生命周期交互进程”收敛到同一个可审批、可回放、可中断、可复用的执行平面中。它并不只是在 `exec` 上再套一层 API，而是在运行时语义上引入了 `process_id`、`write_stdin`、延迟网络审批、输出缓冲裁剪和后台清理策略——这些都是可在源码里直接定位的实体。
 
-从源码规模看（基于 `wc -l` 实测），这条链路跨度较大：`codex-rs/core/src/exec.rs`（1510 行）、`codex-rs/core/src/unified_exec/process_manager.rs`（1299 行）、`codex-rs/shell-command/src/parse_command.rs`（2526 行）、`codex-rs/shell-escalation/src/unix/escalate_server.rs`（1064 行）、`codex-rs/core/src/exec_policy.rs`（1047 行）共同组成了“命令从模型 token 到 OS 进程”的执行闭环。仓库层面统计到 121 个 `Cargo.toml`，其中 120 个位于 `codex-rs/` 子树下；以 `find -maxdepth 2` 统计得到 87 个 workspace 成员 crate。可见这一机制并非“单文件工具函数”，而是跨 crate 的基础设施能力。
+从源码规模看（基于 `wc -l` 实测），这条链路跨度较大：`codex-rs/core/src/exec.rs`（1510 行）、`codex-rs/core/src/unified_exec/process_manager.rs`（1299 行）、`codex-rs/shell-command/src/parse_command.rs`（2526 行）、`codex-rs/shell-escalation/src/unix/escalate_server.rs`（1064 行）、`codex-rs/core/src/exec_policy.rs`（1047 行）共同组成了“命令从模型 token 到 OS 进程”的执行闭环。仓库层面约有 `~120` 个 Rust crate / `Cargo.toml`，绝大多数位于 `codex-rs/` 子树下。可见这一机制并非“单文件工具函数”，而是跨 crate 的基础设施能力。
 
 本章按“全网调研补充 + 七维分析框架”展开，强调两件事：第一，所有核心判断尽量回到可定位的源码证据；第二，凡是涉及“为什么这样设计”的解释，区分“源码事实”与“合理推测”。
 
@@ -177,7 +177,7 @@ pub enum EscalationExecution {
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, .messageText, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","textColor":"#000000","edgeLabelBackground":"#ffffff"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart LR
     User["User_or_Model"] --> Handler["ExecCommandHandler"]
     Handler --> Runtime["UnifiedExecRuntime"]
@@ -198,7 +198,7 @@ flowchart LR
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, .messageText, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","textColor":"#000000","edgeLabelBackground":"#ffffff"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart TD
     A["Parse_ExecCommandArgs"] --> B["allocate_process_id"]
     B --> C["get_command_and_shell_mode"]
@@ -227,7 +227,7 @@ pub(crate) async fn release_process_id(&self, process_id: i32) { ... }
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, .messageText, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","textColor":"#000000","edgeLabelBackground":"#ffffff"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 sequenceDiagram
     participant Model
     participant Handler
@@ -258,7 +258,7 @@ sequenceDiagram
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, .messageText, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","textColor":"#000000","edgeLabelBackground":"#ffffff"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 stateDiagram-v2
     [*] --> ReservedId
     ReservedId --> Spawning: "open_session_with_exec_env"
@@ -281,7 +281,7 @@ stateDiagram-v2
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, .messageText, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","textColor":"#000000","edgeLabelBackground":"#ffffff"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 erDiagram
     EXEC_COMMAND_REQUEST ||--|| UNIFIED_EXEC_PROCESS_MANAGER : submitted_to
     UNIFIED_EXEC_PROCESS_MANAGER ||--o{ PROCESS_ENTRY : stores
@@ -315,7 +315,7 @@ erDiagram
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, .messageText, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","textColor":"#000000","edgeLabelBackground":"#ffffff"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 sequenceDiagram
     participant Shell
     participant Wrapper
@@ -1207,7 +1207,7 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 
 ## 附：命令执行治理方法论（长期维护指南）
 
-如果把 `unified_exec` 放到“长期维护”语境里，它实际上对应一个更大的命题：**如何在 AI 代理持续自治时，保持命令执行的可控性与可恢复性**。本节给出一套可参考的方法论，便于其他章节甚至其他项目复用。需要说明：方法论部分属于工程经验类总结，相比源码事实，置信度更偏“可辩护建议”而非“必然结论”。
+如果把 `unified_exec` 放到“长期维护”语境里，它实际上对应一个更大的命题：**如何在 AI 代理持续自治时，保持命令执行的可控性与可恢复性**。本节给出一套可参考的方法论，便于其他章节甚至其他项目复用。需要说明：方法论部分属于工程经验类总结，相比源码事实，置信度更偏“可辩护建议”而非“确定结论”。
 
 ### 方法一：把需求拆成四层，而不是一个“执行命令”需求
 
@@ -1278,7 +1278,7 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 3. **状态恢复**：进程异常终止时及时释放 ID，避免资源泄漏；  
 4. **会话恢复**：shutdown 后保证无僵尸进程，下一会话干净启动。  
 
-这也解释了为什么 `release_process_id + terminate_all_processes + shutdown cleanup` 在源码上被作为主功能维护，而不是边缘清理代码。
+这也可以解释为什么 `release_process_id + terminate_all_processes + shutdown cleanup` 在源码上被作为主功能维护，而不是边缘清理代码。
 
 ### 方法六：风险分级要与用户心智一致
 
@@ -1356,7 +1356,7 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
 治理子系统的评判标准也随之变化：  
 不只是“执行成功率”一项，而是“成功率 + 可解释性 + 可恢复性 + 可观测性 + 可演进性”的组合。  
 
-当你用这套标准回看 `unified_exec` 的设计，会发现很多看似“啰嗦”的逻辑（比如多层策略、状态持久化、统一事件、冗余清理）其实都有它的位置。它们共同保证了一个事实：命令执行不只是能跑，还要在长期自治中**跑得稳、跑得明白、跑得可控**。
+当你用这套标准回看 `unified_exec` 的设计，会发现很多看似“啰嗦”的逻辑（比如多层策略、状态持久化、统一事件、冗余清理）其实都有它的位置。它们共同支撑了一个判断：命令执行不只是能跑，还要在长期自治中**跑得稳、跑得明白、跑得可控**。
 
 ## 附：源码证据索引与阅读路径建议
 

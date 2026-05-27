@@ -7,10 +7,10 @@
 本章不做"谁更强"的横向打分（那种比较通常被模型版本、benchmark 选择、harness 调优三件事主导，无法稳定结论），而是以**架构对比**为目标，回答三类问题：
 
 1. **它们为什么会长成这种形状？** 各自的源码结构折射出的哲学差异是什么。
-2. **当 Codex 强调 `113 个 crate + 多 surface + 三层协议 + 三 OS 沙箱`时，竞品省掉了什么？** 那些被省掉的部分是否就是它们的"差异化"，又是否会成为它们未来的债。
+2. **当 Codex 强调 `约 120 个 crate + 多 surface + 三层协议 + 三 OS 沙箱`时，竞品省掉了什么？** 那些被省掉的部分是否就是它们的"差异化"，又是否会成为它们未来的债。
 3. **Codex 还缺什么？** Hook 系统的"只有 AfterAgent 一种事件"、Cloud Tasks 的"自带 ratatui 主循环"、外部代理迁移的"严格白名单"——这些选择对应着哪些被 Claude Code / Opencode 做得更轻松的事。
 
-为了避免"读后悔录"式的对比文（"我用了 X 个月，A 比 B 好"），本章引用的所有结论都尽量挂回三类证据：**官方文档**、**社区可验证讨论**、**Codex 源码具体路径行号**。源码基线仍然是 `/Users/hexiaonan/workspace/formless/refer/codex/codex-rs/`，113 个 workspace member（`codex-rs/Cargo.toml`），1,168,717 行代码（本地 `git ls-files` 统计同日复核）。Claude Code 与 Opencode 的对应实现没有同等可读的源码（前者闭源，后者代码已开源但本章因主题约束不展开它的 crate 级细节），因此对比时主要依据官方文档与第三方架构分析。
+为了避免"读后悔录"式的对比文（"我用了 X 个月，A 比 B 好"），本章引用的所有结论都尽量挂回三类证据：**官方文档**、**社区可验证讨论**、**Codex 源码具体路径行号**。源码基线仍然是 `/Users/hexiaonan/workspace/formless/refer/codex/codex-rs/`，约 120 个 workspace member（`codex-rs/Cargo.toml`），1,102,175 行代码（本地 `git ls-files` 统计同日复核）。Claude Code 与 Opencode 的对应实现没有同等可读的源码（前者闭源，后者代码已开源但本章因主题约束不展开它的 crate 级细节），因此对比时主要依据官方文档与第三方架构分析。
 
 ---
 
@@ -49,18 +49,18 @@
 社区文章大量讨论 *capability surface*（"它能做什么"），但下面这些**架构形态本身**的差异基本上是"盲区"：
 
 1. **Codex 的 Hook 系统**当前在源码层面**只有 `AfterAgent` 一种事件**（`codex-rs/hooks/src/types.rs:L92-97`），而 Claude Code 公开有 26 种 lifecycle event。社区在比较时几乎不引用这条事实，而是按官方营销叙事认为两者 hook 能力对等。这是个非常显著的能力差距。
-2. **Codex 的 `app-server` 是真正独立的产品边界协议**：4 个独立 crate（`app-server / app-server-protocol / app-server-transport / app-server-client + app-server-daemon`），supported transports 是 `Stdio / UnixSocket / WebSocket / Off`。Claude Code 与 Opencode 都没有"协议层独立分发"的同等结构。这点社区偶有提及但很少作为"架构差异"系统讨论。
+2. **Codex 的 `app-server` 是真正独立的产品边界协议**：5 个相关 crate（`app-server / app-server-protocol / app-server-transport / app-server-client / app-server-daemon`），supported transports 是 `Stdio / UnixSocket / WebSocket / Off`。Claude Code 与 Opencode 都没有"协议层独立分发"的同等结构。这点社区偶有提及但很少作为"架构差异"系统讨论。
 3. **Submission channel 容量是 hard-coded 512**（`codex-rs/core/src/session/mod.rs:L422`：`pub(crate) const SUBMISSION_CHANNEL_CAPACITY: usize = 512;`）。这意味着当一个客户端短时间推超过 512 个 submission（极端 multi-agent 场景），channel 会背压。社区从来不提这个常量。
-4. **Tools facade 是 92 行的极薄壳**（`codex-rs/tools/src/lib.rs`，共 17 个子模块），真正的工具实现都在 `core/src/unified_exec/`、`apply-patch/` 等横向 crate。这种"facade in tools crate + heavy lifting elsewhere"的设计在 Claude Code（闭源）和 Opencode（TS 实现）里都看不到对照。
+4. **Tools facade 是 92 行的极薄壳**（`codex-rs/tools/src/lib.rs`，共 16 个子模块），真正的工具实现都在 `core/src/unified_exec/`、`apply-patch/` 等横向 crate。这种"facade in tools crate + heavy lifting elsewhere"的设计在 Claude Code（闭源）和 Opencode（TS 实现）里都看不到对照。
 5. **三者对 `SQLite` 的依赖深度不同**：Codex 的 `state` crate + `thread-store` + `rollout` 已经把 SQLite 当成第一等公民，而 Opencode 的官方文档强调"SQLite sessions + summary"但只用作 session metadata，Claude Code 主要靠 JSON transcript。这条差异决定了"长会话恢复能力上限"。
 6. **"submission_loop 单循环 vs Claude Code Agent Teams 多循环"是一个真正的架构分叉**：Codex 的 `submission_loop`（`codex-rs/core/src/session/handlers.rs:L708-856`）是单 `Receiver<Submission>` 串行 dispatch；Claude Code 的 Agent Teams 在协议层就允许多 session 并行。这个"单 vs 多"的根本差异决定了 Codex 多代理拓扑要走 `agent-graph-store` + spawn 新 session 的路线，而不是天然 multi-loop。
-7. **`AppServerRuntimeOptions` 的三段开关**（`codex-rs/app-server/src/lib.rs:L402-417`：`plugin_startup_tasks / remote_control_enabled / install_shutdown_signal_handler`）暴露出 Codex 把 daemon 化作为一等公民的设计意图——Claude Code 不需要这种结构因为没有"中央 daemon"概念，Opencode 走 HTTP 后端但不预设 lifecycle 控制开关。
+7. **`AppServerRuntimeOptions` 的三段开关**（`codex-rs/app-server/src/lib.rs:L402-L417`：`plugin_startup_tasks / remote_control_enabled / install_shutdown_signal_handler`）可能暴露出 Codex 把 daemon 化作为一等公民的设计取向——Claude Code 不需要这种结构因为没有"中央 daemon"概念，Opencode 走 HTTP 后端但不预设 lifecycle 控制开关。
 
 带着这 7 个盲区进入七维分析，比"只看 marketing surface"要清晰得多。
 
 需要补充一句方法论：本章对盲区的定义是"**源码可证、社区少谈、对工程实践有实际影响**"三者必须同时满足。仅仅是"社区少谈"还不够（很多内容社区少谈是因为不重要），仅仅是"源码可证"也不够（很多源码细节只是实现细节）。真正的盲区是那种"看起来重要、但因为缺乏中文资料或英文深度讨论而被普通读者忽略"的设计选择。Codex 的 `SUBMISSION_CHANNEL_CAPACITY = 512`、Hook 系统只有 `AfterAgent`、`AppServerRuntimeOptions` 的三段开关——这些都是典型的"高影响低能见度"盲区，它们决定了工具的实际行为，但官方文档和社区文章都没有专门解释。
 
-读者如果想把这种"盲区识别"能力迁移到其他工具的研究上，建议的方法是：**先翻仓库的 `**/lib.rs` 入口、再翻 `**/types.rs` 或 `**/schema.rs` 数据契约、再翻 `**/manager.rs` 协调器**——这三类文件往往承载着工具的真实抽象，而 README / docs 经常只描述 marketing surface。Codex 这种 113 crate 的工程在 GitHub 上 star 很多但真正读源码的人很少，这就是为什么本章能挖出这么多"盲区"——它们不是被刻意隐藏，而是被"读源码门槛"自然过滤掉了。
+读者如果想把这种"盲区识别"能力迁移到其他工具的研究上，建议的方法是：**先翻仓库的 `**/lib.rs` 入口、再翻 `**/types.rs` 或 `**/schema.rs` 数据契约、再翻 `**/manager.rs` 协调器**——这三类文件往往承载着工具的真实抽象，而 README / docs 经常只描述 marketing surface。Codex 这种约 120 个 crate 的工程在 GitHub 上 star 很多但真正读源码的人很少，这就是为什么本章能挖出这么多"盲区"——它们不是被刻意隐藏，而是被"读源码门槛"自然过滤掉了。
 
 ---
 
@@ -97,10 +97,10 @@ pub struct Codex {
 
 下图把三者的核心分层画在同一张坐标系里，便于直观对比。
 
-<div style="background: #ffffff !important; background-color: #ffffff !important; border: 1px solid #d0d7de; border-radius: 8px; padding: 16px; margin: 16px 0; overflow-x: auto;" bgcolor="#ffffff">
+<div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme": "base", "themeCSS": "svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, text { color: #000000 !important; fill: #000000 !important; }", "themeVariables": {"background": "#ffffff", "mainBkg": "#ffffff", "primaryColor": "#f5f5f5", "primaryTextColor": "#000000", "primaryBorderColor": "#333333", "secondaryColor": "#f6f8fa", "tertiaryColor": "#ffffff", "lineColor": "#444444", "textColor": "#000000", "nodeBorder": "#333333", "clusterBkg": "#fafafa", "clusterBorder": "#888888", "edgeLabelBackground": "#ffffff", "fontFamily": "Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart LR
     subgraph CodexCol["Codex"]
         CSurfaces["Surfaces<br/>CLI/TUI/SDK/IDE/Cloud"]
@@ -129,7 +129,7 @@ flowchart LR
 
 </div>
 
-这张图最有意义的对比点是 **"协议中枢"那一行**。Codex 把它做成 4 个独立 crate，Claude Code 把它做成 26 种 hook 事件（hook 既是 governance 也是隐式协议），Opencode 把它做成 HTTP + SSE 后端。三种实现各有取舍：Codex 的协议化最重也最可演进，Claude Code 的 hook 最灵活但与运行时同进程，Opencode 的 HTTP 最 RESTful 但缺少"双向 server→client request"的同步语义。
+这张图最有意义的对比点是 **"协议中枢"那一行**。Codex 把它做成 5 个相关 crate，Claude Code 把它做成 26 种 hook 事件（hook 既是 governance 也是隐式协议），Opencode 把它做成 HTTP + SSE 后端。三种实现各有取舍：Codex 的协议化最重也最可演进，Claude Code 的 hook 最灵活但与运行时同进程，Opencode 的 HTTP 最 RESTful 但缺少"双向 server→client request"的同步语义。
 
 从这种"哲学差异"出发再回头看入口对象，会更容易理解为什么 Codex 的 `Codex` struct 只有 5 个字段——它把"额外的状态"全部 push 到了 `Arc<Session>` 与 `app-server` 协议层，让入口本身保持极简、可被任何 surface 复用。Claude Code 的入口对象之所以更重，是因为它承担了"应用层 governance + 多策略 compaction + transcript 文件管理"这些 Codex 拆到不同 crate 的职责。Opencode 的入口对象则更接近"HTTP server config"——它的复杂度沉淀在 provider router 而不是 harness 本身。三者的体重分布完全不同，这种差异在 Markdown 文档里很难一眼看出，但在源码层面是非常清晰的。
 
@@ -141,25 +141,25 @@ flowchart LR
 
 1. **如何安全执行 shell 命令而不破坏用户机器或外泄数据。** 这是所有编码代理的第一公约——但答案完全分叉。Codex 走 OS 沙箱（`codex-rs/sandboxing/src/manager.rs:L22-L28` 的 `SandboxType` 枚举：`None / MacosSeatbelt / LinuxSeccomp / WindowsRestrictedToken`，4 种值覆盖 3 个 OS）；Claude Code 走应用层 hook + 权限提示；Opencode 走 approval channel。三套答案对应三种信任假设。
 2. **如何在长会话中管理上下文窗口。** Codex 的方案是 `compact` op（`codex-rs/core/src/session/handlers.rs:L803-L806`：`Op::Compact => compact(...)`），调用 OpenAI 的 remote compaction API；同时 `rollout` crate 将事件落 JSONL、`state` crate 将线程元数据落 SQLite，使 compact 失败可以走 resume 路径。Claude Code 用 multi-strategy compaction（社区盲测说效果更稳但失败时调试更难）；Opencode 用 SQLite sessions + summary，对长会话恢复有原生支持但 compaction 策略较少透明。
-3. **如何把工具调用做成可扩展的。** Codex 用 `tools` crate（`codex-rs/tools/src/lib.rs`，92 行 facade，17 个子模块 `code_mode / dynamic_tool / function_call_error / image_detail / json_schema / mcp_tool / request_plugin_install / responses_api / tool_call / tool_config / tool_definition / tool_discovery / tool_executor / tool_output / tool_payload / tool_spec`）暴露 schema 与 executor 抽象，再叠加 MCP + Plugin 市场扩展。Claude Code 主打 hook + MCP；Opencode 主打 75+ provider 自带工具 + MCP。
+3. **如何把工具调用做成可扩展的。** Codex 用 `tools` crate（`codex-rs/tools/src/lib.rs`，92 行 facade，16 个子模块 `code_mode / dynamic_tool / function_call_error / image_detail / json_schema / mcp_tool / request_plugin_install / responses_api / tool_call / tool_config / tool_definition / tool_discovery / tool_executor / tool_output / tool_payload / tool_spec`）暴露 schema 与 executor 抽象，再叠加 MCP + Plugin 市场扩展。Claude Code 主打 hook + MCP；Opencode 主打 75+ provider 自带工具 + MCP。
 4. **如何让 multi-surface 用户体验一致。** Codex 用 `app-server` 协议层强制所有 surface 共用同一份契约；Claude Code 用同一 harness binary + 26 种 hook 让所有 surface 共享同一套 lifecycle；Opencode 用 HTTP 后端让多 client 接同一项目。
 5. **如何让用户写约束（"团队的代理约定"）。** 三家都收敛到 `AGENTS.md / CLAUDE.md`——这其实是 Codex 与 Claude Code 同时"教育市场"的结果。
 6. **如何让外部 provider / 工具加入而不破坏核心稳定性。** Codex 通过 `core-plugins` + MCP 双轨；Claude Code 通过 MCP + hook；Opencode 通过 provider 抽象 + MCP。
 
-Codex 在这 6 类问题上的取向是最"工程化"的：**优先抽象出协议契约，再在契约里嵌入扩展点**。这让它的可演进性强（v2 在 active development），但学习曲线也最陡（113 crate，普通用户很难直接读懂）。
+Codex 在这 6 类问题上的取向是很"工程化"的：**优先抽象出协议契约，再在契约里嵌入扩展点**。这让它的可演进性强（v2 在 active development），但学习曲线也偏陡（约 120 个 crate，普通用户很难直接读懂）。
 
-把这 6 类问题再细化到 Codex / Claude Code / Opencode 三套实现，可以发现一个有趣的模式：**Codex 倾向于"先建抽象再扩展"**，例如先有 `SandboxType` 枚举再有三 OS 后端、先有 `Op` 枚举再有 21 个 handler、先有 `transport::AppServerTransport` 再有 stdio/uds/ws 实现；**Claude Code 倾向于"先看用户痛点再加 hook"**，26 种 hook 事件并不是一次性设计完的，而是根据真实需求逐步增加（PreCompact、PermissionRequest 是后期才补的）；**Opencode 倾向于"先连接 provider 再加 client"**，每加一个 provider 都要写一个 adapter，但 harness 本身保持稳定。这三种工程节奏对应着三种产品阶段：Codex 处于"基础设施成熟期"，Claude Code 处于"用户体验打磨期"，Opencode 处于"生态扩张期"。
+把这 6 类问题再细化到 Codex / Claude Code / Opencode 三套实现，可以发现一个有趣的模式：**Codex 倾向于"先建抽象再扩展"**，例如先有 `SandboxType` 枚举再有三 OS 后端、先有 `Op` 枚举再有 25 个 op 分支、先有 `transport::AppServerTransport` 再有 stdio/uds/ws 实现；**Claude Code 倾向于"先看用户痛点再加 hook"**，26 种 hook 事件并不是一次性设计完的，而是根据真实需求逐步增加（PreCompact、PermissionRequest 是后期才补的）；**Opencode 倾向于"先连接 provider 再加 client"**，每加一个 provider 都要写一个 adapter，但 harness 本身保持稳定。这三种工程节奏对应着三种产品阶段：Codex 处于"基础设施成熟期"，Claude Code 处于"用户体验打磨期"，Opencode 处于"生态扩张期"。
 
-在工程债的角度，三者各自背着不同的债：Codex 的债是"113 crate 协作复杂度"以及"Hook 系统能力远落后 Claude Code"（详见 2.7 节）；Claude Code 的债是"hook 与 agent 同进程的安全模型缺口"以及"Anthropic 模型独占限制"；Opencode 的债是"75+ provider 质量参差不齐"以及"multi-agent 编排尚不成熟"。读者在评估三者时，需要意识到自己愿意接受哪一种债——技术选型从来不是"选最好的"，而是"选最能容忍其债的"。
+在工程债的角度，三者各自背着不同的债：Codex 的债是"约 120 个 crate 协作复杂度"以及"Hook 系统能力远落后 Claude Code"（详见 2.7 节）；Claude Code 的债是"hook 与 agent 同进程的安全模型缺口"以及"Anthropic 模型独占限制"；Opencode 的债是"75+ provider 质量参差不齐"以及"multi-agent 编排尚不成熟"。读者在评估三者时，需要意识到自己愿意接受哪一种债——技术选型从来不是"选最好的"，而是"选最能容忍其债的"。
 
 ### 2.3 解决思路与方案
 
 对应到具体架构，三者的解决方案可以画成下面这张并排对比图。Codex 这一侧的源码细节来自 `codex-rs/`，其他两侧的描述基于公开文档与社区分析。
 
-<div style="background: #ffffff !important; background-color: #ffffff !important; border: 1px solid #d0d7de; border-radius: 8px; padding: 16px; margin: 16px 0; overflow-x: auto;" bgcolor="#ffffff">
+<div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme": "base", "themeCSS": "svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, text { color: #000000 !important; fill: #000000 !important; }", "themeVariables": {"background": "#ffffff", "mainBkg": "#ffffff", "primaryColor": "#f5f5f5", "primaryTextColor": "#000000", "primaryBorderColor": "#333333", "secondaryColor": "#f6f8fa", "tertiaryColor": "#ffffff", "lineColor": "#444444", "textColor": "#000000", "nodeBorder": "#333333", "clusterBkg": "#fafafa", "clusterBorder": "#888888", "edgeLabelBackground": "#ffffff", "fontFamily": "Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart TB
     User[User Input]
 
@@ -168,7 +168,7 @@ flowchart TB
         CApp["app-server<br/>run_main_with_transport_options"]
         CSession["Codex.submit<br/>tx_sub Sender Submission"]
         CLoop["submission_loop<br/>handlers.rs L708"]
-        CDispatch["Op Dispatch<br/>21 variants"]
+        CDispatch["Op Dispatch<br/>25 variants"]
         CTool["ToolExecutor<br/>tools crate"]
         CSandbox["sandboxing::Manager<br/>Seatbelt Landlock WFP"]
         CRollout["rollout JSONL plus state SQLite"]
@@ -204,13 +204,13 @@ flowchart TB
 
 把这张图与 `codex-rs` 源码挂回去看：
 
-**Codex 的关键节点是 `submission_loop` 与 `app-server`**。`submission_loop` 是 Codex harness 的中枢，它从一个 `Receiver<Submission>` 里取出一个 `Submission { id, op, trace }`（`codex-rs/protocol/src/protocol.rs:L126-L168`），按 `Op` 类型分发到 21 个 handler 之一：`Interrupt / CleanBackgroundTerminals / RealtimeConversationStart / RealtimeConversationAudio / RealtimeConversationText / RealtimeConversationClose / RealtimeConversationListVoices / UserInput / ThreadSettings / InterAgentCommunication / ExecApproval / PatchApproval / UserInputAnswer / RequestPermissionsResponse / DynamicToolResponse / RefreshMcpServers / ReloadUserConfig / Compact / ThreadRollback / SetThreadMemoryMode / RunUserShellCommand / ResolveElicitation / Shutdown / Review / ApproveGuardianDeniedAction`（实际枚举值在 `codex-rs/core/src/session/handlers.rs:L718-L840` 的 `match sub.op.clone()` 中列出）。
+**Codex 的关键节点是 `submission_loop` 与 `app-server`**。`submission_loop` 是 Codex harness 的中枢，它从一个 `Receiver<Submission>` 里取出一个 `Submission { id, op, trace }`（`codex-rs/protocol/src/protocol.rs:L124-L134`），按 `Op` 类型分发到 25 个 op 分支之一：`Interrupt / CleanBackgroundTerminals / RealtimeConversationStart / RealtimeConversationAudio / RealtimeConversationText / RealtimeConversationClose / RealtimeConversationListVoices / UserInput / ThreadSettings / InterAgentCommunication / ExecApproval / PatchApproval / UserInputAnswer / RequestPermissionsResponse / DynamicToolResponse / RefreshMcpServers / ReloadUserConfig / Compact / ThreadRollback / SetThreadMemoryMode / RunUserShellCommand / ResolveElicitation / Shutdown / Review / ApproveGuardianDeniedAction`（实际枚举值在 `codex-rs/core/src/session/handlers.rs:L718-L840` 的 `match sub.op.clone()` 中列出）。
 
-这 21 个 op 涵盖了"用户输入、审批回执、配置变更、压缩、回滚、关闭、子代理通信"等所有产品语义。设计上它是**串行的**——一个 op 处理完才轮到下一个——这与 Claude Code 的 Agent Teams 并行多 session 形成鲜明对比。
+这 25 个 op 分支涵盖了"用户输入、审批回执、配置变更、压缩、回滚、关闭、子代理通信"等所有产品语义。设计上它是**串行的**——一个 op 处理完才轮到下一个——这与 Claude Code 的 Agent Teams 并行多 session 形成鲜明对比。
 
-值得追问的是，为什么 Codex 选择单 Receiver 串行而不是多 worker 并行？阅读源码不难推断出几个工程理由：第一，session 内部状态（如 `state.session_configuration`、approved command prefixes、network rules）是单 `Arc<Session>` 共享的，并发写需要锁；第二，turn 之间在语义上本来就是串行的——一个 turn 没结束之前发送 `UserInput` 就是矛盾的；第三，串行简化了 rollout JSONL 的顺序保证。这些理由合在一起决定了单 Receiver 是当下最务实的选择。但代价就是 2.7 节提到的："要并行只能 spawn 多 Codex 实例"，多代理拓扑必须走 `agent-graph-store`。
+值得追问的是，为什么 Codex 选择单 Receiver 串行而不是多 worker 并行？阅读源码可以推断出几个可能的工程理由：第一，session 内部状态（如 `state.session_configuration`、approved command prefixes、network rules）是单 `Arc<Session>` 共享的，并发写需要锁；第二，turn 之间在语义上本来就是串行的——一个 turn 没结束之前发送 `UserInput` 就是矛盾的；第三，串行简化了 rollout JSONL 的顺序保证。这些理由合在一起可能解释了为什么单 Receiver 是当下较务实的选择。但代价就是 2.7 节提到的："要并行只能 spawn 多 Codex 实例"，多代理拓扑必须走 `agent-graph-store`。
 
-Claude Code 的关键节点是 **5 层栈 + 26 hook**：context loading → compaction → permission enforcement → tool execution → model layer（按 arXiv March 2026 那篇论文描述）。Codex 没有等价的"5-layer 描述"，但功能等价物大致是：`Session` 加载（context loading）→ `compact` op（compaction）→ `execpolicy + sandbox + network policy`（permission）→ `tools` + `ToolExecutor`（tool execution）→ `model-provider`（model layer）。Codex 把它们打散在 113 个 crate 里，可见度低但抽象边界比"5 层"更细。
+Claude Code 的关键节点是 **5 层栈 + 26 hook**：context loading → compaction → permission enforcement → tool execution → model layer（按 arXiv March 2026 那篇论文描述）。Codex 没有等价的"5-layer 描述"，但功能等价物大致是：`Session` 加载（context loading）→ `compact` op（compaction）→ `execpolicy + sandbox + network policy`（permission）→ `tools` + `ToolExecutor`（tool execution）→ `model-provider`（model layer）。Codex 把它们打散在约 120 个 crate 里，可见度低但抽象边界比"5 层"更细。
 
 Opencode 的关键节点是 **HTTP backend 与 SSE 流**：每个 client 是一条 SSE 连接，多个 client 可以挂同一个项目，session 用 SQLite 持久化。这条设计的代价是它没有 Codex 那种 in-process app-server 的极低延迟，但收益是天然支持远程 / 多 client。
 
@@ -288,7 +288,7 @@ pub async fn run_main_with_transport_options(
 
 9 个参数已经把"配置覆盖、严格模式、analytics、传输、会话来源、auth、runtime 开关"全部正交化。`AppServerRuntimeOptions`（`L402-L417`）的三个开关——`plugin_startup_tasks: PluginStartupTasks::Start/Skip`、`remote_control_enabled: bool`、`install_shutdown_signal_handler: bool`——把 daemon 化能力暴露成显式 API。这种"9 参数函数 + clippy 显式允许 too_many_arguments"的设计在很多代码规范里会被视为坏味道，但在 Codex 的 multi-surface 场景下反而是合理的：每一个参数都对应一个明确的产品需求（不同 surface 需要不同传输、不同 session source、不同 auth、不同 daemon 行为），如果硬要重构成 builder 模式，反而会让"哪些组合合法"这件事变得模糊。源码里直接用 9 参数函数 + `AppServerRuntimeOptions` 这种"小结构体打包子配置"的组合，是一种**显式优于含蓄**的工程审美。
 
-特别值得展开的是 `AppServerRuntimeOptions::default()`：默认 `plugin_startup_tasks = Start`、`remote_control_enabled = false`、`install_shutdown_signal_handler = true`。这意味着默认场景下 Codex 会启动 plugin sync、不启动 remote control、安装 shutdown signal handler——这是为"CLI 用户从 npm 启动"这个最常见场景优化的。但当 `app-server-daemon` 自己 spawn `app-server` 子进程时，会改写这些默认值（不再启动 plugin sync、启用 remote control、不装 shutdown handler），因为 daemon 自己已经做了这些事。这种"默认值的语境敏感性"在源码里需要从多个调用点的 override 反推，没有任何一个文档完整描述过这种 override 关系——这正是 2.5 节列举的盲区之一。
+特别值得展开的是 `AppServerRuntimeOptions::default()`：默认 `plugin_startup_tasks = Start`、`remote_control_enabled = false`、`install_shutdown_signal_handler = true`。这意味着默认场景下 Codex 会启动 plugin sync、不启动 remote control、安装 shutdown signal handler——这可能是为"CLI 用户从 npm 启动"这个常见场景优化的。但当 `app-server-daemon` 自己 spawn `app-server` 子进程时，会改写这些默认值（不再启动 plugin sync、启用 remote control、不装 shutdown handler），因为 daemon 自己已经做了这些事。这种"默认值的语境敏感性"在源码里需要从多个调用点的 override 反推，没有任何一个文档完整描述过这种 override 关系——这正是 2.5 节列举的盲区之一。
 
 **Codex 的 tools facade**
 
@@ -298,20 +298,20 @@ pub async fn run_main_with_transport_options(
 //! outside `codex-core`.
 ```
 
-这 92 行的文件本身就是个 facade，17 个子模块全部 re-export 出去（`pub use ...`）。这种"极薄 facade + 横向 crate 实现"的结构在 Claude Code（闭源）和 Opencode（TS 单 monorepo）里都没有对照。它的工程价值是：**让任何不依赖 `codex-core` 的 crate（比如 `model-provider`、`responses-api-proxy`）也能复用同一份工具 schema**。
+这 92 行的文件本身就是个 facade，16 个子模块全部 re-export 出去（`pub use ...`）。这种"极薄 facade + 横向 crate 实现"的结构在 Claude Code（闭源）和 Opencode（TS 单 monorepo）里都没有对照。它的工程价值是：**让任何不依赖 `codex-core` 的 crate（比如 `model-provider`、`responses-api-proxy`）也能复用同一份工具 schema**。
 
-更深一层看，这种"facade in tools crate"的设计反映了 Codex 工程团队对**循环依赖**的高度警惕。在一个 113 crate 的 workspace 里，如果 `model-provider` 直接依赖 `codex-core`、而 `codex-core` 又依赖 `model-provider`，整个构建图就会塌掉。把工具 schema 与 executor 抽象提取到独立的 `tools` crate，让 `codex-core` 与 `model-provider` 都依赖 `tools` 但互不依赖，是典型的"DIP（依赖倒置）+ facade"组合拳。读者如果对比 Claude Code（单 binary，循环依赖问题被隐藏）和 Opencode（TS monorepo，循环依赖问题由 TypeScript 编译器宽容），就会发现 Rust workspace 强制让架构债显性化的特性反而推动了 Codex 走向更健康的分层。
+更深一层看，这种"facade in tools crate"的设计可以理解为对**循环依赖**的主动规避。在一个约 120 个 crate 的 workspace 里，如果 `model-provider` 直接依赖 `codex-core`、而 `codex-core` 又依赖 `model-provider`，整个构建图就会塌掉。把工具 schema 与 executor 抽象提取到独立的 `tools` crate，让 `codex-core` 与 `model-provider` 都依赖 `tools` 但互不依赖，是典型的"DIP（依赖倒置）+ facade"组合拳。读者如果对比 Claude Code（单 binary，循环依赖问题被隐藏）和 Opencode（TS monorepo，循环依赖问题由 TypeScript 编译器宽容），就会发现 Rust workspace 强制让架构债显性化的特性反而推动了 Codex 走向更健康的分层。
 
-`tools` crate 的 17 个子模块里值得单独点名的是 `tool_executor`（59 行）与 `tool_definition`（30 行）：前者定义了 `ToolExecutor` trait，后者定义了 `ToolDefinition` 结构体。一个 30 行的文件能承载整个工具系统的核心数据契约，这种"小文件 = 大设计"的密度，在 Claude Code / Opencode 里很难找到对应物。读者如果想理解 Codex 的工具系统抽象，**真正应该读的不是 92 行的 `lib.rs`，而是 30 行的 `tool_definition.rs`** 和 59 行的 `tool_executor.rs`——这是源码分析里典型的"抽象密度倒挂"现象：facade 看上去很重，但真正定义抽象的小文件才是核心。
+`tools` crate 的 16 个子模块里值得单独点名的是 `tool_executor`（59 行）与 `tool_definition`（30 行）：前者定义了 `ToolExecutor` trait，后者定义了 `ToolDefinition` 结构体。一个 30 行的文件能承载整个工具系统的核心数据契约，这种"小文件 = 大设计"的密度，在 Claude Code / Opencode 里很难找到对应物。读者如果想理解 Codex 的工具系统抽象，**真正应该读的不是 92 行的 `lib.rs`，而是 30 行的 `tool_definition.rs`** 和 59 行的 `tool_executor.rs`——这是源码分析里典型的"抽象密度倒挂"现象：facade 看上去很重，但真正定义抽象的小文件才是核心。
 
 ### 2.5 易错点和注意事项
 
 把 Codex 与 Claude Code / Opencode 对比时，最容易踩的坑可以归纳为下面这张状态图——它把"用户在三种 harness 之间切换时"的语义陷阱画了出来。
 
-<div style="background: #ffffff !important; background-color: #ffffff !important; border: 1px solid #d0d7de; border-radius: 8px; padding: 16px; margin: 16px 0; overflow-x: auto;" bgcolor="#ffffff">
+<div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme": "base", "themeCSS": "svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, text { color: #000000 !important; fill: #000000 !important; }", "themeVariables": {"background": "#ffffff", "mainBkg": "#ffffff", "primaryColor": "#f5f5f5", "primaryTextColor": "#000000", "primaryBorderColor": "#333333", "secondaryColor": "#f6f8fa", "tertiaryColor": "#ffffff", "lineColor": "#444444", "textColor": "#000000", "nodeBorder": "#333333", "clusterBkg": "#fafafa", "clusterBorder": "#888888", "edgeLabelBackground": "#ffffff", "fontFamily": "Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart TD
     Start[Choose Harness]
     Start --> CodexPath[Codex]
@@ -377,15 +377,15 @@ pub enum HookEvent {
 
 | 维度 | Codex | Claude Code | Opencode |
 |---|---|---|---|
-| 实现语言 | Rust（`codex-rs/Cargo.toml`，113 crate） | 未公开（闭源），跨 surface 共享 binary | TypeScript（Node + Bun） |
+| 实现语言 | Rust（`codex-rs/Cargo.toml`，约 120 个 crate） | 未公开（闭源），跨 surface 共享 binary | TypeScript（Node + Bun） |
 | 许可证 | Apache 2.0 | Proprietary | MIT |
 | 入口分发 | npm 包 + native Rust 二进制 + TS/Python SDK（`codex-cli/bin/codex.js`） | install.sh + 多 surface（VS Code/JetBrains/Desktop/Web） | npm + Desktop + IDE extension |
-| 协议层 | 独立 `app-server` 4 crate（`app-server / app-server-protocol / app-server-transport / app-server-client + app-server-daemon`） | 内置应用层，无独立协议 crate 公开 | HTTP + SSE 后端 |
+| 协议层 | 独立 `app-server` 相关 5 crate（`app-server / app-server-protocol / app-server-transport / app-server-client / app-server-daemon`） | 内置应用层，无独立协议 crate 公开 | HTTP + SSE 后端 |
 | 传输方式 | Stdio / UnixSocket / WebSocket / Off（4 种） | 主要单机 | HTTP + SSE |
 | Harness 入口对象 | `Codex` struct + `tx_sub: Sender<Submission>`（`session/mod.rs:L369-378`） | 5-layer stack（社区描述） | HTTP backend + session manager |
-| 控制循环 | `submission_loop` 单 Receiver + 21 op match（`handlers.rs:L708-840`） | App-layer loop + 26 hook 事件 + Agent Teams 多 loop | HTTP 请求驱动 + task tool |
+| 控制循环 | `submission_loop` 单 Receiver + 25 op match（`handlers.rs:L708-L840`） | App-layer loop + 26 hook 事件 + Agent Teams 多 loop | HTTP 请求驱动 + task tool |
 | 子代理拓扑 | `InterAgentCommunication` op + `agent-graph-store` SQLite | Agent Teams + Agent View 仪表盘 + `/goal` autonomy | Task sub-agents + Scout |
-| 工具系统 | `tools` crate facade（92 行）+ 17 子模块 + MCP + Plugin 市场 | App-layer tool + hook 拦截 + MCP | Provider 原生工具 + MCP |
+| 工具系统 | `tools` crate facade（92 行）+ 16 子模块 + MCP + Plugin 市场 | App-layer tool + hook 拦截 + MCP | Provider 原生工具 + MCP |
 | 工具并发 | 串行（Submission 单 Receiver） | 并行读 + 串行写 | 串行 |
 | Hook 系统 | 当前运行时只暴露 `AfterAgent`（`hooks/src/types.rs:L92-97`） | 26 种 lifecycle 事件 | Approval channel-based |
 | 沙箱实现 | OS 内核层：Seatbelt / Landlock + seccomp / Windows Restricted Token + WFP（`sandboxing/src/manager.rs:L22-L62`） | App-layer permission prompt + hook | UI approval + auto-approve |
@@ -402,7 +402,7 @@ pub enum HookEvent {
 |---|---|---|---|
 | 协议风格 | JSON-RPC 2.0 子集（去掉 `jsonrpc: 2.0` 字段，对齐 MCP） | App-layer call + hook 输入输出 wire | HTTP/JSON + SSE |
 | 双向 server→client 请求 | 是（10 种：`item/commandExecution/requestApproval` 等） | 通过 hook 提示（事件即提示） | 通过 SSE 推送 |
-| Overload backoff | `-32001 Server overloaded; retry later`（`README.md:L49-53`） | 应用层 retry | HTTP 503 |
+| Overload backoff | `-32001 Server overloaded; retry later`（`codex-rs/app-server/README.md:L51-L53`） | 应用层 retry | HTTP 503 |
 | Approval 阻塞模型 | 真同步：等用户 op `ExecApproval` 回流 | Hook 同步：用户 hook 返回 exit code 决定 | Channel-based |
 | 沙箱位置 | OS 内核 syscall 拦截 | App 进程内 hook | App 进程 + UI 提示 |
 | 网络策略 | `network-proxy` + `NetworkSandboxPolicy`（Deny/Ask/Allow） | App-layer block + hook | App-layer + provider 限速 |
@@ -414,10 +414,10 @@ pub enum HookEvent {
 
 理论上没有任何一个 harness 在所有任务上都最强。下面这张图用"任务类型 × 推荐工具"的两维矩阵呈现 2026-05 的社区共识（来自 *Aider vs OpenCode vs Claude Code (2026)*、*o-mega 长任务 2026 指南*、*Termdock* 对比文等）。
 
-<div style="background: #ffffff !important; background-color: #ffffff !important; border: 1px solid #d0d7de; border-radius: 8px; padding: 16px; margin: 16px 0; overflow-x: auto;" bgcolor="#ffffff">
+<div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme": "base", "themeCSS": "svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, text { color: #000000 !important; fill: #000000 !important; }", "themeVariables": {"background": "#ffffff", "mainBkg": "#ffffff", "primaryColor": "#f5f5f5", "primaryTextColor": "#000000", "primaryBorderColor": "#333333", "secondaryColor": "#f6f8fa", "tertiaryColor": "#ffffff", "lineColor": "#444444", "textColor": "#000000", "nodeBorder": "#333333", "clusterBkg": "#fafafa", "clusterBorder": "#888888", "edgeLabelBackground": "#ffffff", "fontFamily": "Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart LR
     subgraph Tasks["任务类型"]
         T1["小型单文件修复"]
@@ -506,19 +506,19 @@ flowchart LR
 
 把"用户输入一句 'fix the failing test'"在三套 harness 里的执行链路画成时序图，能最直观看到差异。Codex 侧的步骤对应到 `submission_loop` 的具体 op；Claude Code 侧基于公开架构描述。
 
-<div style="background: #ffffff !important; background-color: #ffffff !important; border: 1px solid #d0d7de; border-radius: 8px; padding: 16px; margin: 16px 0; overflow-x: auto;" bgcolor="#ffffff">
+<div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme": "base", "themeCSS": "svg { background: #ffffff !important; } .label, .messageText, .loopText, .noteText, text { color: #000000 !important; fill: #000000 !important; }", "themeVariables": {"background": "#ffffff", "mainBkg": "#ffffff", "primaryColor": "#f5f5f5", "primaryTextColor": "#000000", "primaryBorderColor": "#333333", "lineColor": "#444444", "textColor": "#000000", "actorBkg": "#f5f5f5", "actorBorder": "#333333", "actorTextColor": "#000000", "actorLineColor": "#444444", "activationBkg": "#e8e8e8", "activationBorderColor": "#333333", "noteBkgColor": "#f0f0f0", "noteBorderColor": "#888888", "noteTextColor": "#000000", "signalColor": "#444444", "signalTextColor": "#000000", "fontFamily": "Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 sequenceDiagram
     autonumber
     participant U as User
-    participant S as Surface (TUI/IDE)
-    participant P as App-Server Protocol (Codex) or Hook Layer (Claude)
+    participant S as "Surface (TUI/IDE)"
+    participant P as "App-Server Protocol (Codex) or Hook Layer (Claude)"
     participant L as submission_loop or Agent Loop
     participant M as Model API
     participant T as Tool Executor
-    participant G as Governance (Sandbox or Hook)
+    participant G as "Governance (Sandbox or Hook)"
     participant R as Persistence
 
     Note over U,R: Codex path
@@ -570,10 +570,10 @@ sequenceDiagram
 
 最后用一张数据结构 ER 图收尾。Codex harness 内部的核心实体关系是这套对比里**最具源码可证据性**的部分——竞品没有公开等价物，所以这张图本身就是 Codex 的差异化呈现。
 
-<div style="background: #ffffff !important; background-color: #ffffff !important; border: 1px solid #d0d7de; border-radius: 8px; padding: 16px; margin: 16px 0; overflow-x: auto;" bgcolor="#ffffff">
+<div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme": "base", "themeCSS": "svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, text { color: #000000 !important; fill: #000000 !important; }", "themeVariables": {"background": "#ffffff", "mainBkg": "#ffffff", "primaryColor": "#f5f5f5", "primaryTextColor": "#000000", "primaryBorderColor": "#333333", "secondaryColor": "#f6f8fa", "tertiaryColor": "#ffffff", "lineColor": "#444444", "textColor": "#000000", "nodeBorder": "#333333", "clusterBkg": "#fafafa", "clusterBorder": "#888888", "edgeLabelBackground": "#ffffff", "fontFamily": "Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 erDiagram
     CODEX ||--|| SESSION : owns
     CODEX ||--o{ SUBMISSION : enqueues
@@ -648,7 +648,7 @@ erDiagram
 - Opencode 的 `SESSION` 直接绑定 HTTP `CLIENT`，没有 `app-server` 那种"协议层独立"的中间节点；
 - 三者都有 `TURN` 与 `TOOL_CALL` 的概念，但只有 Codex 把 `SANDBOX_TYPE` 编成了数据实体而非配置参数。
 
-这种"把 governance 编进数据模型"是 Codex 区别于其他 harness 最深刻的工程取向之一。把 `SANDBOX_TYPE` 当作 `TOOL_CALL` 的一个属性而不是运行时配置，意味着：每一次工具调用的沙箱选择都被 rollout JSONL 显式记录，回放时能完整重现沙箱决策、审计时能逐条核查"哪些命令在哪种沙箱下跑过"。Claude Code 与 Opencode 因为没有等价的数据节点，事后审计能力相对弱——能看到"工具被调用了"但很难重现"当时的安全边界是什么"。这条差异在合规审计与事后取证场景下意义巨大，但社区分析里几乎从未把它当作 Codex 的差异化优势单独讨论过——这又是一个"高影响低能见度"的设计选择。
+这种"把 governance 纳入执行模型"是 Codex 区别于其他 harness 的重要工程取向之一。把 `SANDBOX_TYPE` 视为 `TOOL_CALL` 的一个约束维度而不是纯粹的 UI 提示，意味着：事后审计不只看"工具被调用了"，还要追问"当时的安全边界是什么"。Claude Code 与 Opencode 因为没有等价的 OS 沙箱维度，事后审计能力相对弱——能看到"工具被调用了"但很难重现"当时的内核级边界是什么"。这条差异在合规审计与事后取证场景下意义巨大，但社区分析里几乎从未把它当作 Codex 的差异化优势单独讨论过——这又是一个"高影响低能见度"的设计选择。
 
 读者如果想把这种"数据模型即工程审美"的视角迁移到自己的项目里，建议的方法是：**每加一个运行时配置时，问自己一个问题——"这个配置是不是应该被记录到持久化轨迹里？" 如果答案是 yes，就把它升格为数据实体而不是仅仅作为运行时参数**。这是 Codex 给整个编码代理生态贡献的一个被严重低估的工程方法论。
 
@@ -662,7 +662,7 @@ erDiagram
 
 **第二**，Codex 当前的最大工程债不是"模型不够好"，而是 **Hook 系统的能力差距**：运行时只暴露 `AfterAgent` 一种事件，而 Claude Code 有 26 种 lifecycle hook。这是一条非常显眼的能力缺口，社区如果想推动 Codex 进步，这是最值得呼吁的方向之一。
 
-**第三**，Codex 的**协议化分层**（`app-server` 4 crate + 4 种 transport）是它真正可持续的差异化优势。多 surface（CLI / TUI / IDE / Cloud / SDK）共享同一份契约，让 v2 API 演进、daemon 化、远程控制都有清晰边界。Claude Code 与 Opencode 都没有等价的"协议独立分发"形态——Claude Code 走 hook（事件即协议）、Opencode 走 HTTP（REST 即协议）。
+**第三**，Codex 的**协议化分层**（`app-server` 相关 5 crate + 4 种 transport）是它真正可持续的差异化优势。多 surface（CLI / TUI / IDE / Cloud / SDK）共享同一份契约，让 v2 API 演进、daemon 化、远程控制都有清晰边界。Claude Code 与 Opencode 都没有等价的"协议独立分发"形态——Claude Code 走 hook（事件即协议）、Opencode 走 HTTP（REST 即协议）。
 
 **第四**，Codex 的**内核沙箱**（三 OS 后端 + 统一 manager）使它在安全敏感、合规要求高的企业场景里几乎没有对手。Claude Code 的 hook 灵活但应用层与 agent 同进程，Opencode 没有同等的 OS 级隔离。
 
@@ -672,7 +672,7 @@ erDiagram
 
 **第七**，整个对比的方法论建议是：**先看入口对象的字段**（Codex 5 字段、Claude Code 5 层栈、Opencode HTTP backend），**再看核心循环**（submission_loop / 5-layer agent loop / HTTP 请求循环），**最后看 governance 位置**（OS syscall / hook / approval）。这三步走下来，能避免被"benchmark 分数"或"营销 surface"主导判断。这套方法论同样适用于评估未来出现的新 harness：当一个新工具出现时，先翻它的入口对象，再读它的主循环，再看它的安全边界——三分钟就能定位它在生态里的位置。
 
-**第八**（补充判断），编码代理这个赛道在 2026 年的成熟度信号已经很明显：harness 工程化（Codex 的 113 crate）、governance 显性化（Codex 的内核 sandbox 与 Claude Code 的 26 hook）、生态标准化（AGENTS.md / CLAUDE.md / MCP 三件套）、多 surface 普及化（CLI / IDE / Desktop / Web / Cloud 全覆盖）。下一阶段的竞争点很可能不再是"模型多强"或"工具多丰富"，而是"长会话稳定性、跨 surface 一致性、企业合规可证明性"——这三件事 Codex 都已经投入了显著资源，但都没有完全做到位。这给社区留下了一个清晰的演进方向。
+**第八**（补充判断），编码代理这个赛道在 2026 年的成熟度信号已经很明显：harness 工程化（Codex 的约 120 个 crate）、governance 显性化（Codex 的内核 sandbox 与 Claude Code 的 26 hook）、生态标准化（AGENTS.md / CLAUDE.md / MCP 三件套）、多 surface 普及化（CLI / IDE / Desktop / Web / Cloud 全覆盖）。下一阶段的竞争点很可能不再是"模型多强"或"工具多丰富"，而是"长会话稳定性、跨 surface 一致性、企业合规可证明性"——这三件事 Codex 都已经投入了显著资源，但都没有完全做到位。这给社区留下了一个清晰的演进方向。
 
 **第九**（社区视角），中文社区在 Codex 相关的讨论上仍然以"安装接入 + 排障经验"为主，深度机制拆解严重不足。本章这种"源码引用 + 行号验证 + 多家对比"的写作方式在中文圈非常稀缺。这既是本研究的价值所在，也提醒读者：当下读到的大部分中文 Codex 文章都不应该作为单一可信源，必须结合源码与英文一手资料交叉验证。
 
@@ -680,7 +680,7 @@ erDiagram
 
 最后还想留下一个观察：编码代理这个赛道在 2026 年呈现出一个**奇特的对称性**——Codex 走"开源代码 + 受控贡献 + 重工程"，Claude Code 走"闭源代码 + 开放产品 + 重 UX 打磨"，Opencode 走"开源代码 + 自由贡献 + 轻工程"。三者各自押注不同的护城河，但都站到了 2026 年这个赛道的头部位置，没有一家被另一家完全压倒。这种"多极化"状态对生态健康极为重要——它意味着开发者真的有得选，团队真的有得比，研究者真的有素材。如果未来某一天这个赛道被单一工具垄断，本章这种对比研究的价值会大幅缩水。这也是为什么本章在写作时刻意避免"褒一贬二"——保持三极并立的叙事，本身就是对生态多样性的尊重。
 
-总纲第 6 节里写过一句话："Codex 把'编码 agent'从模型调用问题，工程化为跨入口、跨协议、跨沙箱、可持久化、可扩展的运行系统。" 把这句话放在本章末尾的合适位置正好是它最有说服力的地方——通过 Claude Code 与 Opencode 的对比，Codex 这套"工程化运行系统"的取舍才被衬托出来。它的代价是 113 crate 的维护复杂度、Windows 测试矩阵的不均衡、Hook 系统的能力缺口；它的收益是协议可演进性、内核级安全保证、长会话可恢复性。任何一个"产品级编码代理"都要在这些权衡里站位——Codex 选择了一条最重也最持久的路径。
+总纲第 6 节里写过一句话："Codex 把'编码 agent'从模型调用问题，工程化为跨入口、跨协议、跨沙箱、可持久化、可扩展的运行系统。" 把这句话放在本章末尾的合适位置正好是它最有说服力的地方——通过 Claude Code 与 Opencode 的对比，Codex 这套"工程化运行系统"的取舍才被衬托出来。它的代价是约 120 个 crate 的维护复杂度、Windows 测试矩阵的不均衡、Hook 系统的能力缺口；它的收益是协议可演进性、内核级安全保证、长会话可恢复性。任何一个"产品级编码代理"都要在这些权衡里站位——Codex 选择了一条较重也较持久的路径。
 
 对读者最后一句话：**真正决定你能否享受到 Codex / Claude Code / Opencode 任意一家工程红利的，不是工具本身，而是你团队对"长会话可恢复、策略可证明、协议可演进"这三件事的重视程度**。如果你只把它们当作 fancy autocomplete，那三家工具的差别就只是 UI 体感的差别；但如果你把它们当作"团队工程基础设施"，那本章七维分析里的每一条判断都会变成你下一次架构决策的依据。这也是本研究系列写到第 24 章时希望传递给读者的核心立场——**不要让工具替你思考，而要让工具放大你思考的工程深度**。
 

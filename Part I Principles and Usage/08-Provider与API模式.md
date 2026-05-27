@@ -132,7 +132,7 @@ impl<'de> Deserialize<'de> for WireApi {
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","clusterBkg":"#fafafa","clusterBorder":"#888888","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart TD
     A["Config(model_provider)"] --> B["ModelProviderInfo"]
     B --> C["ModelProvider trait runtime"]
@@ -252,8 +252,7 @@ pub async fn refresh_token(&self) -> Result<(), RefreshTokenError> {
 
 ### 2.4 定量快照（本地核验，2026-05-26）
 
-- `codex-rs` workspace members：`113`（`codex-rs/Cargo.toml` 解析）
-- `codex-rs` 下 `Cargo.toml` 数：`120`（含 tests/common 等子目录）
+- `codex-rs` crate 数量：约 `120`（不同统计口径如 workspace members 与 `Cargo.toml` 数会略有差异）
 - 本章 9 个主路径总计：`8,289` 行（`wc -l` 口径）
 - 其中最大三文件：
   - `realtime_websocket/methods.rs`：`2,348` 行
@@ -385,7 +384,7 @@ pub async fn connect_webrtc_sideband(
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, .messageText, .loopText, .noteText, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","textColor":"#000000","actorBkg":"#f5f5f5","actorBorder":"#333333","actorTextColor":"#000000","actorLineColor":"#444444","activationBkg":"#e8e8e8","activationBorderColor":"#333333","noteBkgColor":"#f0f0f0","noteBorderColor":"#888888","noteTextColor":"#000000","signalColor":"#444444","signalTextColor":"#000000","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 sequenceDiagram
     participant Sess as ModelClientSession
     participant Api as ResponsesHTTP
@@ -406,7 +405,7 @@ sequenceDiagram
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, .messageText, .loopText, .noteText, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","textColor":"#000000","actorBkg":"#f5f5f5","actorBorder":"#333333","actorTextColor":"#000000","actorLineColor":"#444444","activationBkg":"#e8e8e8","activationBorderColor":"#333333","noteBkgColor":"#f0f0f0","noteBorderColor":"#888888","noteTextColor":"#000000","signalColor":"#444444","signalTextColor":"#000000","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 sequenceDiagram
     participant Sess as ModelClientSession
     participant Ws as ResponsesWebSocket
@@ -428,7 +427,7 @@ sequenceDiagram
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","clusterBkg":"#fafafa","clusterBorder":"#888888","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart LR
     A["RealtimeWebsocketClient"] --> B["connect (api_url to ws_url)"]
     A --> C["connect_webrtc_sideband (call_id)"]
@@ -798,7 +797,7 @@ impl RealtimeWebrtcSession {
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","clusterBkg":"#fafafa","clusterBorder":"#888888","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 stateDiagram-v2
     [*] --> Reload
     Reload --> RefreshToken: account_id matched
@@ -814,7 +813,7 @@ stateDiagram-v2
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","clusterBkg":"#fafafa","clusterBorder":"#888888","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart TD
     A["Try Responses WebSocket"] --> B{"upgrade success"}
     B -->|yes| C["WebSocket stream_request"]
@@ -854,7 +853,7 @@ flowchart TD
 ### 6.3 一个值得关注的差异点：Codex 在源码中体现的 “降级可解释性”
 
 从 `core/src/client.rs` 与 `responses_websocket.rs` 可见，Codex 在 WebSocket 失败时存在明确的 fallback 或错误映射分支（`UPGRADE_REQUIRED → FallbackToHttp`、`UNAUTHORIZED → handle_unauthorized`、`websocket_connection_limit_reached → Retryable` 等），而不是统一抽象为 “网络错误重试一下”。  
-对企业环境排障，这种结构上的可定位性通常有帮助：可以区分 `upgrade required`、`401`、`429`、`connection_limit`、`idle timeout` 等场景。但 “是否解释得清楚” 还取决于上层是否真正把这些枚举状态展示到运维面板，这部分本仓未给出端到端示例，不宜把它说成绝对优势。
+对企业环境排障，这种结构上的可定位性通常有帮助：可以区分 `upgrade required`、`401`、`429`、`connection_limit`、`idle timeout` 等场景。但 “是否解释得清楚” 还取决于上层是否真正把这些枚举状态展示到运维面板，这部分本仓未给出端到端示例，不宜把它说成确定性优势。
 
 ---
 
@@ -928,7 +927,7 @@ Responses HTTP/SSE、Responses WebSocket、Realtime WebSocket 各自维护解析
 
 前文已经提过这个机制，但这里强调它的工程意义：  
 `response.processed` 不是“多余确认包”，而是把“客户端已经记录并处理本次响应”这个事实反馈给服务端。  
-在长链路、可中断、可回放场景里，这类 ACK 语义非常关键，它决定了服务端是否可以安全清理某些中间状态，或者在下一次续跑时采用更激进的缓存策略。
+在长链路、可中断、可回放场景里，这类 ACK 语义通常很关键；它可能影响服务端如何清理中间状态，或在下一次续跑时采用怎样的缓存策略，但具体策略源码无法直接证明。
 
 **第 6 步：本路径的收益与代价**
 
@@ -1387,8 +1386,8 @@ Codex 的状态机复杂度来自现实约束：需要保证账号匹配、并�
 
 ### Q6：`response.processed` 不发会怎样？
 
-短期看可能“还能跑”，长期会降低服务端状态协同能力。  
-在长会话中，ACK 语义决定了服务端是否能安全推进状态管理。  
+短期看可能“还能跑”，长期可能降低客户端与服务端的状态协同能力。  
+在长会话中，ACK 语义可能影响服务端是否能安全推进状态管理。  
 因此建议把它看成“协议完整性”而不是“可有可无的附加事件”。
 
 ### Q7：自定义 provider 最容易在哪一步踩坑？

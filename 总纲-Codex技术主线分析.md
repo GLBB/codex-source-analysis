@@ -11,7 +11,7 @@
 
 按 2026-05-27 复核口径，Codex 的规模可以用四个数字刻画：
 
-- **crate 数：113**（从 `codex-rs/Cargo.toml` 的 `members = [...]` 段枚举抽取，路径 `codex-rs/Cargo.toml:L2-L116`）。
+- **crate 数：约 120**（从 `codex-rs/Cargo.toml` 的 `members = [...]` 段枚举抽取，路径 `codex-rs/Cargo.toml:L2-L116`）。
 - **代码行数：约 1,168,067 行**；**tracked files：4,655**（在仓库根目录用 `git ls-files | wc -l` 与 `git ls-files | xargs wc -l` 复核所得；该口径含全部 tracked 文本/非文本文件，仅供量级参考，不代表"代码净行")。
 - **GitHub Stars：约 8.5 万量级**（口径见 [openai/codex repo API](https://api.github.com/repos/openai/codex)；具体数字随时间漂移，本文不固定）。
 - **GitHub contributors：>400**（口径见 [contributors API page1](https://api.github.com/repos/openai/codex/contributors?per_page=100&page=1) 并按页累加；与 Stars 一样属浮动指标）。
@@ -32,7 +32,7 @@ Codex 的入口不是单点，而是三类面向不同用户群体的入口。
 
 3. **TS / Python SDK（程序化入口）**  
    TypeScript SDK 文档明确其通信方式是 CLI 子进程 + stdin/stdout JSONL 事件流（`sdk/typescript/README.md:L5-L6`）。  
-   Python SDK 明确 `app-server` JSON-RPC v2 over stdio（`sdk/python/README.md:L3-L4`），并要求 Python 3.10+（`sdk/python/pyproject.toml:L14`）。  
+   Python SDK 明确 `app-server` JSON-RPC v2 over stdio（`sdk/python/README.md:L3-L4`），并要求 Python 3.10+（`sdk/python/pyproject.toml:L10`）。  
    这意味着 SDK 面向的是"把 Codex 接到系统里"，而不仅是"人工在终端里对话"。
 
 从入口分层看，Codex 把"安装分发"、"本地运行"、"程序集成"拆成了不同责任域，但保持一套核心执行语义，理论上可以降低跨入口行为漂移。能否做到，要看每个 surface 是否都通过 `app-server-client` 进入同一 in-process 服务（见 §4）。
@@ -504,7 +504,7 @@ flowchart TD
 
 - `app-server-protocol` 仍保留 v1 allowlist（`JSON_V1_ALLOWLIST = &["InitializeParams", "InitializeResponse"]`，`codex-rs/app-server-protocol/src/export.rs:L41-L51`），说明兼容负担仍在。
 - 同时 AGENTS 明确新 API 面向 v2，避免继续扩 v1（`AGENTS.md:L184-L196`，关键一句在 L186）。
-- v2 模块化拆分明显更完整（`codex-rs/app-server-protocol/src/protocol/v2/mod.rs:L1-L54`，覆盖 account/apps/config/environment/thread/turn 等 28 个子模块）。
+- v2 模块化拆分明显更完整（`codex-rs/app-server-protocol/src/protocol/v2/mod.rs:L1-L54`，覆盖 account/apps/config/environment/thread/turn 等约 26 个模块）。
 
 这三条合起来是典型"迁移中态"：  
 **不是立刻废弃 v1，而是通过治理规则和新功能投放方向，逐步把生态重心推向 v2**。是否会最终下线 v1，源码尚未给出明确证据。
@@ -609,7 +609,7 @@ flowchart LR
 
 ### 10.2 哪些设计有明显代价
 
-1. **Rust 维护成本**：113 crate 协作复杂度高，新人切入曲线陡（`codex-rs/Cargo.toml:L2-L116`）。
+1. **Rust 维护成本**：约 120 个 crate 协作复杂度高，新人切入曲线陡（`codex-rs/Cargo.toml:L2-L116`）。
 2. **跨平台安全测试成本**：三套后端导致测试矩阵扩大，Windows 边界问题在社区中相对密集。
 3. **治理门槛成本**：invitation-only + CLA 提升主线控制，同时降低外部贡献即时性（`docs/contributing.md:L3`, `L80-L92`）。
 4. **架构复杂度对小用户的负担**：一个只想"在终端 chat 一次"的用户，需要承担 app-server + transport + 协议 + 持久化的全套抽象成本，即使他根本用不到。

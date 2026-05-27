@@ -14,7 +14,7 @@
 
 按本章复核口径（2026-05-26，基线 `formless/refer/codex`）：
 
-- `codex-rs` 中 `Cargo.toml` 文件共 **120** 个（`find ... -name Cargo.toml`）
+- `codex-rs` 中 `Cargo.toml` 文件约 **120** 个（`find ... -name Cargo.toml`）
 - `windows-sandbox-rs/src/**/*.rs` 共 **52** 个 Rust 源文件
 - 关键文件规模（`wc -l` 实测）：
   - `src/setup.rs`：**1665 行**，`fn` 约 **69** 个
@@ -123,7 +123,7 @@ pub use elevated_impl::run_windows_sandbox_capture as run_windows_sandbox_captur
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart TD
     App["CodexAppOrCli"] --> Lib["windows-sandbox-rs lib.rs facade"]
     Lib --> SetupOrch["setup.rs orchestrator"]
@@ -309,7 +309,7 @@ let ok = unsafe { ShellExecuteExW(&mut sei) };
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 sequenceDiagram
     participant Cli as CodexCli
     participant Orch as setup.rs
@@ -430,7 +430,7 @@ let (pi, stdout_handle, stderr_handle, stdin_handle) = if req.tty {
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart LR
     Parent["elevated_impl.rs"] --> Client["runner_client.rs"]
     Client --> Logon["CreateProcessWithLogonW"]
@@ -633,7 +633,7 @@ Ok(Err(err)) => {
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart TD
     Env["ProxyEnvMap"] --> Parse["proxy_ports_from_env"]
     Parse --> Marker["SetupMarker compare"]
@@ -658,7 +658,7 @@ flowchart TD
 //!
 //! This module encapsulates ConPTY creation and process spawn with the required
 //! `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE` plumbing. It is shared by both the legacy
-//! restricted-token path and the elevated runner path when unified_exec runs with
+//! restricted‑token path and the elevated runner path when unified_exec runs with
 //! `tty=true`.
 ```
 
@@ -672,7 +672,7 @@ attrs.set_pseudoconsole(hpc)?;
 CreateProcessAsUserW(...)
 ```
 
-换句话说：在 Windows 这套设计里，ConPTY 不只是「让 TUI 工具看起来正常」的 UI 层补丁，而是 runner 在 tty 分支下唯一能用的进程派生形态——没有 ConPTY，就无法在沙箱用户身份下同时拿到 PTY 与 token 隔离。
+换句话说：在 Windows 这套设计里，ConPTY 不只是「让 TUI 工具看起来正常」的 UI 层补丁，而是 runner 在 tty 分支下承载 PTY 与 token 隔离组合的关键进程派生形态。
 
 ---
 
@@ -792,7 +792,7 @@ if refresh_only && !refresh_errors.is_empty() {
 2. 网络策略绑定到用户 SID（Firewall + WFP）；
 3. runner 在沙箱用户上下文内再做 restricted token spawn，而不是由主进程一把梭。
 
-这套组合在同类工具的公开实现里，目前看起来覆盖最完整，工程量也最大；但它的「重」也意味着更多平台兼容面，不一定适合所有发行环境。
+这套组合在同类工具的公开实现里，目前看起来覆盖较完整，工程量也较大；但它的「重」也意味着更多平台兼容面，不一定适合所有发行环境。
 
 ---
 
@@ -821,7 +821,7 @@ WFP 安装失败继续 setup 的策略提升了可用性，但要求观测闭环
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 stateDiagram-v2
     [*] --> NotReady
     NotReady --> ElevationSetup: "marker missing or mismatch"
@@ -838,7 +838,7 @@ stateDiagram-v2
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart LR
     Marker["SetupMarker(version, proxy_ports, allow_local_binding)"] --> ReadyCheck["sandbox_setup_is_complete"]
     Users["SandboxUsersFile(offline, online)"] --> ReadyCheck

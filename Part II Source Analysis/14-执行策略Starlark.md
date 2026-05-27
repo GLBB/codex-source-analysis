@@ -12,7 +12,7 @@
 
 按本章复核口径（2026-05-26，本地源码统计）：
 
-- `codex-rs` 下 `Cargo.toml` 文件数：**120**  
+- `codex-rs` 下 `Cargo.toml` 文件数：约 **120**（本地粗计为 120）  
 - `codex-rs/Cargo.toml` workspace member 数：**113**  
 - 本章核心 6 个文件总计：**2248 行**
   - `execpolicy/src/parser.rs`：472 行  
@@ -163,7 +163,7 @@ HN 价值在于高频、真实、噪音与信号并存。
 
 它揭示了一个现实：  
 很多用户并不追求完美策略模型，而是追求“减少打断 + 保持基本安全”。  
-这正是自动建议规则功能存在的业务动机。
+这可能也是自动建议规则功能要解决的一类业务动机。
 
 #### 7) 机器之心（本主题覆盖稀薄）
 
@@ -259,7 +259,7 @@ pub(crate) struct ExecPolicyManager {
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#ffffff","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","textColor":"#000000","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart LR
     A["RuleFiles"] --> B["PolicyParser"]
     B --> C["PolicyObject"]
@@ -478,7 +478,7 @@ fn from_matches(matched_rules: Vec<RuleMatch>) -> Self {
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#ffffff","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","textColor":"#000000","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart TD
     A["StarlarkRules"] --> B["ParserBuiltins"]
     B --> C["PolicyBuilder"]
@@ -497,7 +497,7 @@ flowchart TD
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#ffffff","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","textColor":"#000000","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 sequenceDiagram
     participant U as UserRequest
     participant M as ExecPolicyManager
@@ -722,7 +722,7 @@ For an overview of execution policy rules, see [this documentation](https://deve
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#ffffff","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","textColor":"#000000","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart TD
     A["LoadRules"] --> B["ParseStarlark"]
     B --> C["ValidateExamples"]
@@ -739,7 +739,7 @@ flowchart TD
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#ffffff","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","textColor":"#000000","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 stateDiagram-v2
     [*] --> ExactMatch
     ExactMatch --> PolicyDecision
@@ -1030,7 +1030,7 @@ pub struct ExecPolicyCheckCommand {
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#ffffff","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","textColor":"#000000","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart LR
     A["PolicyBuilder"] --> B["Policy"]
     B --> C["RuleMatch"]
@@ -1133,7 +1133,7 @@ pub fn matches_prefix(&self, cmd: &[String]) -> Option<Vec<String>> {
 
 **陷阱 8：忽略 `used_complex_parsing` 的副作用**  
 复杂解析场景下会关闭某些自动 amendment 逻辑，防止基于不稳定解析结果扩权。  
-这意味着同一条用户命令在不同解析路径下，建议行为可能不同，属于“有意设计”。
+这意味着同一条用户命令在不同解析路径下，建议行为可能不同，属于代码中明确区分出的行为。
 
 **陷阱 9：把 policy prompt 与 sandbox prompt 混为一谈**  
 `prompt_is_rejected_by_policy()` 明确区分规则提示与沙箱提示，granular 配置下二者可独立拒绝。
@@ -1437,7 +1437,7 @@ pub(crate) fn validate_not_match_examples(
 ### C. 前缀建议治理：把“自动建议”视作高风险入口
 
 自动建议规则是提升体验的重要能力，但绝不是“默认接受越多越好”。  
-源码里之所以维护 46 条 `BANNED_PREFIX_SUGGESTIONS`，就是为了压制“看似便利、实则过宽”的建议前缀。
+源码里维护 46 条 `BANNED_PREFIX_SUGGESTIONS`，可理解为在压制“看似便利、实则过宽”的建议前缀。
 
 实践里建议把建议规则分成三类处理：
 
@@ -1517,7 +1517,7 @@ pub(crate) fn validate_not_match_examples(
 4. **审计化**：关键仓库定期导出策略变更与命中差异。  
 5. **演进化**：按季度回收无效规则，避免规则库持续膨胀。  
 
-如果不做资产化，系统初期看起来“能跑”，中后期必然会遇到：
+如果不做资产化，系统初期看起来“能跑”，中后期很可能会遇到：
 - 规则越来越多但没人敢改；  
 - prompt 越来越多却没人能解释；  
 - 安全与效率拉扯长期无解。  
@@ -1697,7 +1697,7 @@ pub(crate) fn validate_not_match_examples(
 
 典型写法是直接放行 `bash -lc`、`python -c`、`sh -c`。  
 这类规则看起来能减少弹窗，实则把执行边界整体打开。  
-`BANNED_PREFIX_SUGGESTIONS` 之所以存在，就是为了阻止这类扩权建议自动落地。  
+`BANNED_PREFIX_SUGGESTIONS` 的存在，可理解为阻止这类扩权建议自动落地。  
 
 建议做法是：
 - 放行具体工具前缀，不放行通用解释器入口；  

@@ -113,7 +113,11 @@ if turn_context.config.include_skill_instructions {
         },
     );
     if let Some(available_skills) = available_skills {
+        let warning_message = available_skills.warning_message.clone();
         let skills_instructions = AvailableSkillsInstructions::from(available_skills);
+        if let Some(warning_message) = warning_message {
+            // ... emit warning event ...
+        }
         developer_sections.push(skills_instructions.render());
     }
 }
@@ -140,7 +144,7 @@ impl ContextualUserFragment for SkillInstructions {
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","clusterBkg":"#fafafa","clusterBorder":"#888888","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart LR
     A["User 输入"] --> B["TurnContext"]
     B --> C["BaseInstructions"]
@@ -200,7 +204,7 @@ pub fn collect_explicit_skill_mentions(
 
 ### 定量快照（本地核验，2026-05-26）
 
-- `codex-rs` 子 crate 数：约 `87`（按 `find codex-rs -maxdepth 2 -name Cargo.toml` 去掉 workspace 自身后得到）。
+- `codex-rs` 子 crate 数：约 `120`（按 `codex-rs` 下 `Cargo.toml` 粗计，含 workspace、测试与工具 crate）。
 - `core-skills/src` 总计：`15` 个文件、`7,256` 行。
 - 章节主线 8 个文件合计：`3,483` 行
   - `gpt_5_codex_prompt.md`：`68`
@@ -252,7 +256,7 @@ let skill_items: Vec<ResponseItem> = skill_injections
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","clusterBkg":"#fafafa","clusterBorder":"#888888","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart TD
     A["roots 构建"] --> B["扫描 SKILL.md"]
     B --> C["解析 frontmatter/openai.yaml"]
@@ -311,7 +315,7 @@ loop {
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","clusterBkg":"#fafafa","clusterBorder":"#888888","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart TD
     A["skill lines"] --> B{"full_cost <= budget"}
     B -->|yes| C["完整描述"]
@@ -541,7 +545,7 @@ for tool in &dependencies.tools {
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, .messageText, .loopText, .noteText, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","textColor":"#000000","actorBkg":"#f5f5f5","actorBorder":"#333333","actorTextColor":"#000000","actorLineColor":"#444444","activationBkg":"#e8e8e8","activationBorderColor":"#333333","noteBkgColor":"#f0f0f0","noteBorderColor":"#888888","noteTextColor":"#000000","signalColor":"#444444","signalTextColor":"#000000","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 sequenceDiagram
     participant User
     participant Turn
@@ -554,7 +558,7 @@ sequenceDiagram
     Selector-->>Turn: mentioned_skills
     Turn->>Loader: build_skill_injections
     Loader-->>Turn: items + warnings
-    Turn->>History: append <skill>
+    Turn->>History: "append <skill>"
     Turn->>Model: next sampling
 ```
 
@@ -565,7 +569,7 @@ sequenceDiagram
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","clusterBkg":"#fafafa","clusterBorder":"#888888","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 stateDiagram-v2
     [*] --> Check
     Check --> Exit: "关闭或无 mention"

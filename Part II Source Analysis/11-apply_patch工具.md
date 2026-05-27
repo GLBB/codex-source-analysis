@@ -18,7 +18,7 @@
 
 ### 2. 社区相对收敛的几点共识
 
-1. `apply_patch` 不是任意 diff 文本，而是一套结构化编辑协议；Codex 模型在训练阶段对它有显式适配（可由模型行为间接观察，但并未在公开文档完全披露）。
+1. `apply_patch` 不是任意 diff 文本，而是一套结构化编辑协议；Codex 模型可能在训练阶段对它有显式适配（可由模型行为间接观察，但并未在公开文档完全披露）。
 2. 该协议在多文件、多 hunk 编辑下相对稳定，且天然容易接入审批与审计。
 
 ### 3. 主要分歧与常见误解
@@ -91,7 +91,7 @@ path = "src/main.rs"
 
 **定量定位（本章重新核对的结果）**：
 
-- `codex-rs/**/Cargo.toml` 总数：`120`，与项目“约 120 个 crate”的基线一致。
+- `codex-rs/**/Cargo.toml` 总数：`~120`，与项目“约 120 个 crate”的基线一致。
 - `codex-rs/apply-patch/src/` 共 `7` 个 Rust 文件：`lib.rs / parser.rs / streaming_parser.rs / invocation.rs / seek_sequence.rs / main.rs / standalone_executable.rs`。
 - 关键文件行数：`lib.rs=1692`、`parser.rs=954`、`streaming_parser.rs=851`、`invocation.rs=926`，四者合计 `4423` 行；连同 `seek_sequence (163) / main (3) / standalone (83)` 后整个 crate 主源码合计 `4672` 行。
 
@@ -106,7 +106,7 @@ path = "src/main.rs"
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","lineColor":"#444444","textColor":"#000000","primaryTextColor":"#000000","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart LR
     Model["LLM 输出 patch 文本"] --> Spec["ToolSpec (Lark grammar)"]
     Spec --> Handler["ApplyPatchHandler"]
@@ -386,7 +386,7 @@ fn compute_replacements(
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","lineColor":"#444444","textColor":"#000000","primaryTextColor":"#000000","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart TD
     InPatch["patch 字符串"] --> Boundary["check_patch_boundaries (strict or lenient)"]
     Boundary --> Env["parse_environment_id_preamble"]
@@ -447,12 +447,12 @@ pub fn push_delta(&mut self, delta: &str) -> Result<Vec<Hunk>, ParseError> {
 }
 ```
 
-`finish()` 还要求最后一行必须收尾为 `*** End Patch`，否则报错。这保证了 UI 上显示的 patch 预览永远是“**结构合法、但未必落盘**”的中间态。
+`finish()` 还要求最后一行必须收尾为 `*** End Patch`，否则报错。因此在该路径上，UI 上显示的 patch 预览应被理解为“**结构合法、但未必落盘**”的中间态。
 
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","lineColor":"#444444","textColor":"#000000","primaryTextColor":"#000000","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 stateDiagram-v2
     [*] --> NotStarted
     NotStarted --> StartedPatch: BeginPatch
@@ -540,7 +540,7 @@ pub struct ApplyPatchAction {
 
 `UpdateFileChunk`（4 字段）是 update hunk 的最小语义单元：
 
-```112:120:codex-rs/apply-patch/src/parser.rs
+```112:126:codex-rs/apply-patch/src/parser.rs
 pub struct UpdateFileChunk {
     /// A single line of context used to narrow down the position of the chunk
     pub change_context: Option<String>,
@@ -569,7 +569,7 @@ impl AppliedPatchDelta {
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","lineColor":"#444444","textColor":"#000000","primaryTextColor":"#000000","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart TB
     Args["ApplyPatchArgs\npatch hunks workdir environment_id"] --> Hunk["Hunk enum\nAdd Delete Update"]
     Hunk --> Chunk["UpdateFileChunk\nchange_context old_lines new_lines eof"]
@@ -878,7 +878,7 @@ const PARSE_IN_STRICT_MODE: bool = false;
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","lineColor":"#444444","textColor":"#000000","primaryTextColor":"#000000","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart LR
     Diff["argument diff"] --> Parse["StreamingPatchParser"]
     Parse --> Buffer["500ms buffer"]
@@ -903,4 +903,4 @@ flowchart LR
 2. **安全前置**：用 `verify_apply_patch_args` + `assess_patch_safety` 把“能不能执行”和“怎么执行”分开。
 3. **失败可解释**：用 `AppliedPatchDelta.exact` 显式表达“部分成功”，让上层有机会做差异化处理。
 
-现实摩擦层也依然存在：文档与实现的偏差、两套 parser 的一致性维护、跨 shell 兼容的盲点、宽松匹配的误配风险。对生态而言，下一阶段的难点不是“写得更巧”，而是“**改得可预期**”——让 grammar、parser、executor 三层对“什么是合法 patch”的定义彻底收敛。
+现实摩擦层也依然存在：文档与实现的偏差、两套 parser 的一致性维护、跨 shell 兼容的盲点、宽松匹配的误配风险。对生态而言，下一阶段的难点不是“写得更巧”，而是“**改得可预期**”——让 grammar、parser、executor 三层对“什么是合法 patch”的定义进一步收敛。

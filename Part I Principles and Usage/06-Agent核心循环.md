@@ -15,7 +15,7 @@ Codex 的"Agent 核心循环"并不是一个 `loop { call_model(); call_tool(); 
 
 | 指标 | 数值 | 证据 |
 |---|---:|---|
-| `codex-rs` `Cargo.toml` 总数 | 120 | `find codex-rs -name Cargo.toml | wc -l` |
+| `codex-rs` `Cargo.toml` 总数 | ~120 | `find codex-rs -name Cargo.toml | wc -l` |
 | `session/mod.rs` 行数 | 3339 | `codex-rs/core/src/session/mod.rs` |
 | `session/turn.rs` 行数 | 2180 | `codex-rs/core/src/session/turn.rs` |
 | `session/session.rs` 行数 | 1235 | `codex-rs/core/src/session/session.rs` |
@@ -132,7 +132,7 @@ pub(super) async fn submission_loop(
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","lineColor":"#444444","textColor":"#000000","clusterBkg":"#fafafa","clusterBorder":"#888888","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart TD
     Input["Client_Input"] --> Submit["Submission_Queue"]
     Submit --> SessionLoop["submission_loop"]
@@ -190,7 +190,7 @@ pub(crate) struct TurnState {
 
 ### 痛点 B：上下文增长导致的 token 压力
 
-`run_turn` 每轮都会从 `sess.clone_history()` 重建 prompt（`turn.rs:229-233`），follow-up 多了之后必然触发 context limit。当下的实现采用 pre-turn + mid-turn compaction：
+`run_turn` 每轮都会从 `sess.clone_history()` 重建 prompt（`turn.rs:229-233`），follow-up 多了之后更容易触发 context limit。当下的实现采用 pre-turn + mid-turn compaction：
 
 ```rust
 // codex-rs/core/src/session/turn.rs:281 (节选)
@@ -289,7 +289,7 @@ pub async fn spawn_task<T: SessionTask>(
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","secondaryColor":"#f6f8fa","tertiaryColor":"#ffffff","lineColor":"#444444","textColor":"#000000","clusterBkg":"#fafafa","clusterBorder":"#888888","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart TD
     Recv["recv_submission"] --> Match["match_Op"]
     Match --> UserInput["Op_UserInput"]
@@ -315,7 +315,7 @@ flowchart TD
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, .messageText, .loopText, .noteText, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","textColor":"#000000","actorBkg":"#f5f5f5","actorBorder":"#333333","actorTextColor":"#000000","actorLineColor":"#444444","activationBkg":"#e8e8e8","activationBorderColor":"#333333","noteBkgColor":"#f0f0f0","noteBorderColor":"#888888","noteTextColor":"#000000","signalColor":"#444444","signalTextColor":"#000000","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 sequenceDiagram
     participant Sess as "Session"
     participant Task as "Task"
@@ -349,7 +349,7 @@ sequenceDiagram
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","textColor":"#000000","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 stateDiagram-v2
     [*] --> Idle
     Idle --> Active : "start_task"
@@ -371,7 +371,7 @@ stateDiagram-v2
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, .nodeLabel, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","textColor":"#000000","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 classDiagram
     class Session {
       "+active_turn"
@@ -414,7 +414,7 @@ classDiagram
 <div style="background:#ffffff !important; background-color:#ffffff !important; padding:16px; border-radius:8px; margin:16px 0;" bgcolor="#ffffff">
 
 ```mermaid
-%%{init: {"theme":"neutral","themeCSS":"svg { background: #ffffff !important; } .label, .nodeLabel, .edgeLabel, text { fill: #000000 !important; color: #000000 !important; }","themeVariables":{"background":"#ffffff","mainBkg":"#ffffff","primaryColor":"#f5f5f5","primaryTextColor":"#000000","primaryBorderColor":"#333333","lineColor":"#444444","textColor":"#000000","edgeLabelBackground":"#ffffff","fontFamily":"Helvetica"}}}%%
+%%{init:{'theme':'neutral','themeVariables':{'background':'#ffffff'}}}%%
 flowchart LR
     Start["start_thread"] --> SpawnWith["spawn_thread_with_source"]
     Resume["resume_thread"] --> SpawnWith

@@ -1,24 +1,70 @@
 # 附录 C — 参考文献与引用来源
 
-> 本附录汇总《OpenAI Codex 源码深度研究》引用的全部外部资料。一手资料置顶，第三方分析按发布日期降序排列。
+> 本附录汇总《OpenAI Codex 源码深度研究》引用的全部外部资料。一手资料置顶，第三方分析按主题分组。完整原始链接表见 `全网调研-社区认知地图.md`。
 
-## C.1 一手资料（官方）
+## C.1 一手资料（OpenAI 官方）
 
-- OpenAI Codex 仓库 — https://github.com/openai/codex
-- Codex CLI 官方文档 — `docs/` 目录（getting-started / install / authentication / config / sandbox / skills / slash_commands / execpolicy）
-- AGENTS.md 规范 — `docs/agents_md.md`
-- OpenAI Engineering Blog（按需补充）
-- OpenAI Cookbook（按需补充）
+- **代码仓库** — https://github.com/openai/codex
+- **CLI 官方文档站** — https://developers.openai.com/codex/cli
+  - Features — https://developers.openai.com/codex/cli/features
+  - Windows — https://developers.openai.com/codex/windows
+  - MCP — https://developers.openai.com/codex/mcp
+  - App-Server — https://developers.openai.com/codex/app-server
+- **OpenAI 主站发布**
+  - Introducing Codex — https://openai.com/index/introducing-codex/
+  - Unrolling the Codex Agent Loop — https://openai.com/index/unrolling-the-codex-agent-loop/
+  - Unlocking the Codex Harness — https://openai.com/index/unlocking-the-codex-harness/
+- **官方帮助中心** — https://help.openai.com/en/articles/11369540-codex-in-chatgpt
+- **仓内文档** — `docs/getting-started.md`、`docs/install.md`、`docs/authentication.md`、`docs/config.md`、`docs/sandbox.md`、`docs/skills.md`、`docs/slash_commands.md`、`docs/execpolicy.md` 等 16 篇
 
-## C.2 第三方深度分析
+## C.2 第三方深度分析（英文）
 
-> 由 Phase 2 全网调研生成的链接表会被复制到此处，并去重、按主题归并。在 Phase 2 完成前保留占位。
+- **Simon Willison**
+  - First-look — https://simonwillison.net/2025/Apr/16/openai-codex/
+  - How I think about Codex — https://simonwillison.net/2026/Feb/22/how-i-think-about-codex/
+- **Pragmatic Engineer — How Codex is built** — https://newsletter.pragmaticengineer.com/p/how-codex-is-built
+- **Latent Space — GPT-5 Codex max & training agents** — https://www.latent.space/p/gpt5-codex-max-training-agents-with
+- **Hacker News 主线**
+  - https://news.ycombinator.com/item?id=43708025
+  - https://news.ycombinator.com/item?id=46738288
+  - https://news.ycombinator.com/item?id=46737630
+  - https://news.ycombinator.com/item?id=44150093
+  - https://news.ycombinator.com/item?id=44833858
 
-| 标题 | 作者 / 媒体 | 发布日期 | 链接 | 主题 |
-|------|-------------|----------|------|------|
-| _（待 Phase 6 整理后填入）_ | | | | |
+## C.3 第三方深度分析（中文）
 
-## C.3 同类项目对照
+- **InfoQ**
+  - Codex CLI 架构分析 — https://www.infoq.cn/article/I4fzvM0XQoWQQYOD6LYT
+  - Codex 训练与产品化 — https://www.infoq.cn/article/Ac7pCglOgaK4tEoWg5b7
+- **掘金 / CSDN / 博客园 / 少数派 / 知乎**
+  - 掘金 Codex 深读 — https://juejin.cn/post/7613658235174387727
+  - 博客园 Codex 工具链笔记 — https://www.cnblogs.com/sddai/p/18830867
+  - CSDN Codex 入门 — https://blog.csdn.net/qq_31095905/article/details/147887930
+  - 少数派 Codex 工作流 — https://sspai.com/post/105621
+  - 知乎 Codex 长文 — https://zhuanlan.zhihu.com/p/2038317397019505265
+- **火山引擎开发者社区** — https://developer.volcengine.com/articles/7606557839506538506
+- **iThome（繁体）** — https://www.ithome.com.tw/news/169341
+
+## C.4 社区生态
+
+- **awesome-codex-cli** — https://github.com/RoggeOhta/awesome-codex-cli
+- **核心 Issue 与 PR 讨论**（截至 2026-05）
+  - https://github.com/openai/codex/issues/5
+  - https://github.com/openai/codex/issues/8925
+  - https://github.com/openai/codex/issues/10090
+  - https://github.com/openai/codex/issues/13279
+  - https://github.com/openai/codex/issues/14913
+  - https://github.com/openai/codex/issues/16808
+  - https://github.com/openai/codex/issues/17179
+  - https://github.com/openai/codex/issues/18829
+  - https://github.com/openai/codex/issues/19116
+  - https://github.com/openai/codex/issues/19372
+  - https://github.com/openai/codex/issues/22335
+  - https://github.com/openai/codex/issues/22428
+  - https://github.com/openai/codex/issues/23902
+  - https://github.com/openai/codex/pull/15276
+
+## C.5 同类项目对照
 
 - Claude Code — https://github.com/anthropics/claude-code
 - Opencode — https://github.com/sst/opencode
@@ -27,26 +73,27 @@
 - Continue — https://github.com/continuedev/continue
 - Cline — https://github.com/cline/cline
 
-## C.4 协议与规范
+## C.6 协议与规范
 
 - Model Context Protocol — https://modelcontextprotocol.io
 - JSON-RPC 2.0 — https://www.jsonrpc.org/specification
 - OAuth 2.1 — https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1
-- LangChain Agent / OpenAI Responses API（按需补充）
 
-## C.5 沙箱与安全
+## C.7 沙箱与安全
 
-- macOS Seatbelt（`sandbox-exec`）— Apple 内部文档（部分逆向自 WebKit）
+- macOS Seatbelt（`sandbox-exec`）— Apple 内部文档（部分逆向自 WebKit `Sandbox.sb`）
 - Bubblewrap — https://github.com/containers/bubblewrap
 - Linux Landlock — https://landlock.io
-- Windows Filtering Platform — Microsoft Docs
+- Windows Filtering Platform — https://learn.microsoft.com/windows/win32/fwp/
 
-## C.6 本研究方法论
+## C.8 本研究方法论与同作者前作
 
-- `source-deep-research` skill 工作流（7 阶段）
+- `source-deep-research` skill 7 阶段工作流
 - `mermaid-academic` skill 图表规范
-- 同作者前作：
-  - https://github.com/xiaonancs/claude-code-source-analysis
-  - https://github.com/xiaonancs/hermes-agent-study
+- 同作者前作
+  - [Claude Code Source Analysis](https://github.com/xiaonancs/claude-code-source-analysis)
+  - [Hermes Agent Study](https://github.com/xiaonancs/hermes-agent-study)
 
-> 全部链接在 Phase 6 整理阶段做一次失效检测（HTTP 200 / 重定向跟踪），失效链接标记 `(已失效)`。
+---
+
+> 本附录链接基于全网调研阶段（2026-05）截取。GitHub Issue / PR 编号与外部链接均可能随时间失效，重要资料建议在引用时同步保存原文快照（Wayback Machine 等）。
