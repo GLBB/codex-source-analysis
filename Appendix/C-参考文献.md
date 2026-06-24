@@ -67,9 +67,9 @@
 ## C.5 同类项目对照
 
 - Claude Code — https://github.com/anthropics/claude-code
-- Opencode — https://github.com/sst/opencode
+- OpenCode — https://github.com/anomalyco/opencode
 - Aider — https://github.com/Aider-AI/aider
-- Goose — https://github.com/block/goose
+- goose — https://github.com/aaif-goose/goose
 - Continue — https://github.com/continuedev/continue
 - Cline — https://github.com/cline/cline
 
@@ -96,4 +96,4 @@
 
 ---
 
-> 本附录链接基于全网调研阶段（2026-05）截取。GitHub Issue / PR 编号与外部链接均可能随时间失效，重要资料建议在引用时同步保存原文快照（Wayback Machine 等）。
+> 本附录最后复核于 2026-06-25。Continue 官方仓库已进入只读状态；外部链接与项目归属仍可能变化，引用时应记录访问日期。

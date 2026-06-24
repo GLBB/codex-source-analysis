@@ -1,158 +1,92 @@
 # OpenAI Codex 源码深度研究
 
-> 这份研究覆盖 OpenAI Codex CLI / Rust 主体 / TS+Python SDK 全貌：**2 篇总纲 + 25 章正文 + 3 个附录**，约 **51 万中文字 / 1.5 MB Markdown** 与 **149 张 Mermaid 架构图**。
+这是一份以 OpenAI Codex 当前源码为事实来源的中文研究手册。正文继续沿用原有的“2 篇总纲 + 25 章 + 附录”结构，并逐章直接覆盖更新；不会用另一套并行文档替代旧章节。
 
-## 系列研究
+## 当前源码基线
 
-本研究是 AI Agent / Coding Harness 源码深度研究系列的一部分，姊妹篇：
+| 项目 | 值 |
+| --- | --- |
+| 上游仓库 | `openai/codex` |
+| 分支 | `upstream/main` |
+| 提交 | `283bc4cf011047314b4804c0f1ccd06e4f6a95c5` |
+| 复核日期 | `2026-06-24` |
+| 路径口径 | 文中 `codex-rs/...` 等路径均相对于 Codex 仓库根目录 |
 
-- [Claude Code 源码解析](https://github.com/xiaonancs/claude-code-source-analysis) — Anthropic Claude Code v2.1.88 完整 Agent Harness 拆解（30 篇 / 23 个子系统 / 179 张架构图）
-- [Hermes Agent 深度研究](https://github.com/xiaonancs/hermes-agent-study) — Hermes Agent + 4 个同源/对比项目（OpenClaw / EvoMap / OpenHarness / JiuwenClaw），含抄袭分析（38 篇 / 32 章 / 97 张架构图）
-- [OpenClaw 源码深度研究](https://github.com/xiaonancs/openclaw-study) — 358k Stars OpenClaw v2026.4.15 源码 + 23k commits + 生态调研
+详细的基线、证据等级和更新规则见 [SOURCE-BASELINE.md](SOURCE-BASELINE.md)。
 
-## 引言
+## 正文主线
 
-OpenAI Codex 在 2025–2026 年从一个早期 TS 原型重写为以 Rust 为主体的多入口 harness：
+- [总纲：Codex 技术主线分析](总纲-Codex技术主线分析.md)
+- [全网调研：社区认知地图](全网调研-社区认知地图.md)
+- [Part I：原理与使用（01–08）](Part%20I%20Principles%20and%20Usage/)
+- [Part II：源码专题（09–21）](Part%20II%20Source%20Analysis/)
+- [Part III：对比分析（22–25）](Part%20III%20Comparative%20Analysis/)
+- [附录 F：Context 预算、压缩与 Reference Context](Appendix/F-Context预算压缩与ReferenceContext.md)
+- [附录 G：Multi-Agent、Review、Guardian 与 Goal](Appendix/G-MultiAgentReviewGuardian与Goal.md)
+- [附录 H：工程测试、Schema 与可观测性](Appendix/H-工程测试Schema与可观测性.md)
+- [附录 I：PathUri、环境注册与远程执行](Appendix/I-PathUri环境注册与远程执行.md)
+- [逐章重写覆盖矩阵](Appendix/E-逐章重写覆盖矩阵.md)
 
-- **codex-cli**（npm）— 跨平台启动器，把请求转交给原生二进制
-- **codex-rs**（Rust workspace，~120 个 crate）— 真正的核心：CLI、TUI、Agent 循环、App-Server JSON-RPC、沙箱、Plugin 市场、MCP、Cloud Tasks
-- **sdk/typescript** 与 **sdk/python** — 通过 spawn CLI 或 App-Server JSON-RPC 暴露给外部应用
+每章只有在源码锚点、正文、异常路径和验证命令均完成复核后，才会在覆盖矩阵中标记为“已完成”。
 
-本研究分三部分对其进行系统性源码层面解析：
-<br>`Part I 使用方法与原理（8 章）`
-<br>`Part II 源码解析（13 章）`
-<br>`Part III 对比与延展（4 章）`
+## 补充研究素材
 
-生成流程采用三阶段写作：
-- **第一稿**：GPT-5.3 Codex High（章节 01-15 + 总纲 + 全网调研）/ Claude Opus 4.7 Thinking High（章节 16-25）
-- **review 与优化升级**：Claude Opus 4.7 Thinking High 对 17 篇做源码引用核验 + 七维框架补全 + Mermaid 加固
-- **最终质量检测**：GPT-5.5 High 对全 27 篇做 Mermaid 合规、跨章一致性、措辞审慎度收束
+`Current Source Analysis/` 中的 12 篇机制稿是本轮重写的研究素材，不是替代正文的第二套目录。相关结论已经合并回 25 章；原章节无法完整容纳的主题已整理为附录 F–I。
 
-## 研究结构
+| # | 专题 | 核心问题 |
+| --- | --- | --- |
+| 01 | [总体架构与演进](Current%20Source%20Analysis/01-architecture-and-evolution.md) | Codex 为什么从 CLI 演进成 agent runtime workspace？ |
+| 02 | [Agent 主循环](Current%20Source%20Analysis/02-agent-loop.md) | 一次用户请求如何变成模型采样、工具调用和最终回复？ |
+| 03 | [Context 构建与压缩](Current%20Source%20Analysis/03-context-and-compaction.md) | 模型看到了什么，长上下文如何计数、压缩与恢复？ |
+| 04 | [Tool System](Current%20Source%20Analysis/04-tool-system.md) | 内建、MCP、动态和协作工具如何统一规划与调度？ |
+| 05 | [Shell、Patch 与执行环境](Current%20Source%20Analysis/05-shell-patch-exec-env.md) | 命令与补丁如何跨本地/远程环境安全执行？ |
+| 06 | [Sandbox、Permission 与安全策略](Current%20Source%20Analysis/06-sandbox-permission-security.md) | 审批、沙箱、exec policy、网络策略分别控制什么？ |
+| 07 | [App Server 与协议](Current%20Source%20Analysis/07-app-server-protocol.md) | Codex 如何为 IDE、桌面端和 SDK 提供有状态协议？ |
+| 08 | [TUI 与用户交互](Current%20Source%20Analysis/08-tui-user-experience.md) | 终端如何投影 streaming、审批、diff 与后台状态？ |
+| 09 | [MCP、Skills、Plugins、Connectors](Current%20Source%20Analysis/09-mcp-skills-plugins-connectors.md) | 外部能力如何发现、过滤、安装并按需暴露给模型？ |
+| 10 | [Thread Store、Rollout 与恢复](Current%20Source%20Analysis/10-thread-store-rollout-recovery.md) | 会话如何持久化、重建、恢复、分叉与回滚？ |
+| 11 | [Multi-Agent、Review、Guardian、Goal](Current%20Source%20Analysis/11-multi-agent-review-guardian-goal.md) | 子 agent、审查、安全代理和长目标如何协作？ |
+| 12 | [工程化、测试与可观测性](Current%20Source%20Analysis/12-engineering-testing-observability.md) | 生产级 agent 如何建立可重复的证据链？ |
 
-### 总纲
+## 推荐阅读顺序
 
-| 文档 | 内容 |
-|------|------|
-| [总纲 — Codex 技术主线分析](总纲-Codex技术主线分析.md) | 核心机制、设计哲学、火爆原因、整体架构 |
-| [全网调研 — 社区认知地图](全网调研-社区认知地图.md) | 中英文社区技术分析索引、观点争议、认知盲区 |
+```mermaid
+flowchart LR
+    A["01–08 原理与使用"] --> B["09–21 源码专题"]
+    B --> C["22–25 产品与安全对比"]
+    B --> D["附录 F Context"]
+    B --> E["附录 G 协作"]
+    B --> F["附录 H 工程化"]
+    B --> G["附录 I 远程环境"]
+```
 
-### Part I 使用方法与原理（8 章）
+- 想先理解主链路：01 → 02 → 06 → 07 → 09。
+- 想研究执行安全：10 → 11 → 12 → 15 → 25。
+- 想做客户端或 IDE 集成：02 → 19 → 21 → 22。
+- 想理解扩展与协作：07 → 16 → 17 → 18 → 附录 G。
+- 想参与 Codex 开发：最后读附录 H，并按仓库 `AGENTS.md` 运行验证。
 
-| 序号 | 章节 | 关键源码 |
-|------|------|----------|
-| 01 | [项目全景与设计哲学](Part%20I%20Principles%20and%20Usage/01-项目全景与设计哲学.md) | `codex-rs/Cargo.toml`、`AGENTS.md` |
-| 02 | [多入口与启动分发](Part%20I%20Principles%20and%20Usage/02-多入口与启动分发.md) | `codex-cli/bin/codex.js`、`codex-rs/cli/src/main.rs`、`arg0/` |
-| 03 | [配置系统与企业要求](Part%20I%20Principles%20and%20Usage/03-配置系统与企业要求.md) | `core/src/config/mod.rs`、`cloud-requirements/` |
-| 04 | [初级使用方法](Part%20I%20Principles%20and%20Usage/04-初级使用方法.md) | `docs/getting-started.md`、`login/` |
-| 05 | [高级使用方法](Part%20I%20Principles%20and%20Usage/05-高级使用方法.md) | `cloud-tasks/`、`cli/src/mcp_cmd.rs`、`debug_sandbox.rs` |
-| 06 | [Agent 核心循环](Part%20I%20Principles%20and%20Usage/06-Agent核心循环.md) | `core/src/session/mod.rs`、`turn.rs` |
-| 07 | [Prompt 组装与 Skill 注入](Part%20I%20Principles%20and%20Usage/07-Prompt组装与Skill注入.md) | `core/gpt_5_codex_prompt.md`、`core-skills/` |
-| 08 | [Provider 与 Responses/Realtime API](Part%20I%20Principles%20and%20Usage/08-Provider与API模式.md) | `model-provider/`、`codex-api/`、`realtime-webrtc/` |
+## 写作原则
 
-### Part II 源码解析（13 章）
+1. 当前 checkout 的源码、测试和生成 schema 是最高优先级证据。
+2. 使用稳定的文件与符号锚点，避免把易漂移行号写成长期契约。
+3. 当前行为、历史行为和设计推断必须分开表述。
+4. 所有进入模型上下文的机制都要说明边界与硬上限。
+5. 协议、配置、CLI 和 rollout 恢复属于 breaking-change 高风险面。
+6. 重要算法必须给出状态变量、异常路径和验证命令。
 
-| 序号 | 章节 | 关键源码 |
-|------|------|----------|
-| 09 | [工具系统总览](Part%20II%20Source%20Analysis/09-工具系统总览.md) | `tools/`、`core/src/tools/handlers/` |
-| 10 | [命令执行与 unified_exec](Part%20II%20Source%20Analysis/10-命令执行与unified_exec.md) | `core/src/exec.rs`、`shell-command/parse_command.rs` |
-| 11 | [apply_patch 工具](Part%20II%20Source%20Analysis/11-apply_patch工具.md) | `apply-patch/` |
-| 12 | [macOS Seatbelt 与 Linux Bwrap 沙箱](Part%20II%20Source%20Analysis/12-macOS与Linux沙箱.md) | `sandboxing/`、`linux-sandbox/`、`bwrap/` |
-| 13 | [Windows 沙箱与 WFP 防火墙](Part%20II%20Source%20Analysis/13-Windows沙箱与WFP防火墙.md) | `windows-sandbox-rs/` |
-| 14 | [执行策略 Starlark execpolicy](Part%20II%20Source%20Analysis/14-执行策略Starlark.md) | `execpolicy/`、`execpolicy-legacy/` |
-| 15 | [网络代理与策略](Part%20II%20Source%20Analysis/15-网络代理与策略.md) | `network-proxy/` |
-| 16 | [Hook 与生命周期事件](Part%20II%20Source%20Analysis/16-Hook与生命周期事件.md) | `hooks/` |
-| 17 | [Plugin 市场系统](Part%20II%20Source%20Analysis/17-Plugin市场系统.md) | `core-plugins/` |
-| 18 | [MCP 双向集成](Part%20II%20Source%20Analysis/18-MCP双向集成.md) | `codex-mcp/`、`rmcp-client/`、`mcp-server/` |
-| 19 | [会话与轨迹持久化](Part%20II%20Source%20Analysis/19-会话与轨迹持久化.md) | `rollout/`、`rollout-trace/`、`thread-store/`、`state/` |
-| 20 | [记忆系统](Part%20II%20Source%20Analysis/20-记忆系统.md) | `memories/{read,write,mcp}/`、`state/runtime/memories.rs` |
-| 21 | [App-Server JSON-RPC 协议层](Part%20II%20Source%20Analysis/21-AppServer协议层.md) | `protocol/`、`app-server/`、`app-server-protocol/v2/` |
-
-### Part III 对比与延展（4 章）
-
-| 序号 | 章节 | 关键源码 |
-|------|------|----------|
-| 22 | [TUI 渲染管线与 Code Mode V8](Part%20III%20Comparative%20Analysis/22-TUI与CodeMode.md) | `tui/`、`code-mode/` |
-| 23 | [Cloud Tasks 与外部 Agent 迁移](Part%20III%20Comparative%20Analysis/23-CloudTasks与外部Agent迁移.md) | `cloud-tasks/`、`external-agent-migration/`、`agent-graph-store/` |
-| 24 | [Codex vs Claude Code / Opencode 架构对比](Part%20III%20Comparative%20Analysis/24-Codex与同类对比.md) | 横向对比 |
-| 25 | [Codex 沙箱与权限模型 vs 同类](Part%20III%20Comparative%20Analysis/25-Codex沙箱与权限对比.md) | 沙箱与权限模型横评 |
-
-### 附录
-
-| 文档 | 内容 |
-|------|------|
-| [附录 A](Appendix/A-章节配置.yaml) | 章节配置元数据 |
-| [附录 B](Appendix/B-关键数据结构索引.md) | 核心 struct/enum/trait 速查表 |
-| [附录 C](Appendix/C-参考文献.md) | 参考文献与引用来源 |
-
----
-
-## 源码基线
-
-| 项目 | 规模 | 语言 |
-|------|------|------|
-| codex-rs | ~120 crate | Rust |
-| codex-cli | npm 启动器 | TypeScript / Node |
-| sdk/typescript | App-Server / spawn 客户端 | TypeScript |
-| sdk/python | App-Server / spawn 客户端 (含 generated 模型) | Python |
-| docs | 16 篇官方文档 | Markdown |
-
-**三大量级集群（行数）**
-
-| Crate | LOC |
-|-------|-----|
-| `codex-rs/tui` | 193,863 |
-| `codex-rs/core` | 151,372 |
-| `codex-rs/app-server` | 39,229 |
-| `codex-rs/core-plugins` | 21,197 |
-| `codex-rs/windows-sandbox-rs` | 15,902 |
-| `codex-rs/state` | 15,480 |
-
-## 研究规模
-
-| 维度 | 数量 |
-|------|------|
-| 总文档数 | 30 (README + 2 总纲 + 25 章 + 3 附录) |
-| 总字节数 | ~1.54 MB |
-| 中文字数（估计） | ~51 万字 |
-| Mermaid 图表 | 149 张 |
-| 平均每章字数 | ~17,000 字 |
-
-## 怎么读
-
-- **15 分钟掌握全貌**：先读 [总纲](总纲-Codex技术主线分析.md)
-- **快速上手**：Part I 第 4-5 章
-- **理解架构**：Part I 第 6-8 章 + Part II 第 21 章（App-Server 协议层）
-- **沙箱与权限专题**：Part II 第 12-15 章 + Part III 第 25 章
-- **协议演进**：Part II 第 18 章 (MCP) + 第 21 章 (App-Server) + Part III 第 22 章 (Code Mode V8)
-- **横向研究**：Part III 第 24-25 章
-
-## 工程化
+## 校验
 
 ```bash
-# 校验所有 Mermaid 图表语法
+# 在本仓库根目录运行
 npm install
 npm run validate:mermaid
+
+# 在 Codex 源码根目录核对新版引用的路径
+find codex-rs -type f | sort
+rg -n "run_turn|context_window_token_status|build_mcp_tool_exposure|thread/items/list" codex-rs
 ```
-
-当前所有 mermaid 块（149 张架构 / 流程 / 时序 / 状态 / ER 图）均通过 `mermaid@11.x` 解析。
-
-## 写作方法论
-
-本研究遵循 `source-deep-research` 7 阶段工作流：
-
-```
-阶段 1  通读源码，建立 25 章骨架（chapters.yaml）
-阶段 2  全网调研，建立外部认知基线（全网调研.md）
-阶段 3  设计七维结构化 Prompt 集
-阶段 4  cursor-agent 串行批量生成（GPT-5.3 Codex / Opus 4.7）
-阶段 5  Opus 4.7 review + 改进；GPT-5.5 最终质量检测
-阶段 6  系统化整理（README / 章节编号 / 文风 / 图表）
-阶段 7  开源发布
-```
-
-每章遵循"七维分析框架"：本质 → 核心痛点 → 解决思路 → 实现细节 → 易错点 → 竞品对比 → 仍存缺陷。
 
 ## 许可
 
-本研究内容采用 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) 许可证。所分析的源码版权归 OpenAI 所有。
+研究内容采用 [CC BY-SA 4.0](LICENSE)。被分析的 OpenAI Codex 源码版权归其权利人所有。

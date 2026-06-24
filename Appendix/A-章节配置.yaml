@@ -1,19 +1,18 @@
 study:
   title: "OpenAI Codex 源码深度研究"
   subtitle: "从多入口分发到 App-Server JSON-RPC，从沙箱矩阵到 Plugin 市场"
-  source_baseline: "codex 仓库 main 分支 (May 2026)"
+  source_baseline: "openai/codex upstream/main@283bc4cf011047314b4804c0f1ccd06e4f6a95c5 (2026-06-24)"
   scale:
-    rust_crates: 120
+    cargo_manifests: 129
+    rust_files: 2363
+    rust_loc: 1062602
     sdk_languages:
       - TypeScript
       - Python
-    largest_subsystems:
-      - { name: "codex-rs/tui", loc: 193863 }
-      - { name: "codex-rs/core", loc: 151372 }
-      - { name: "codex-rs/app-server", loc: 39229 }
-      - { name: "codex-rs/core-plugins", loc: 21197 }
-      - { name: "codex-rs/state", loc: 15480 }
-      - { name: "codex-rs/windows-sandbox-rs", loc: 15902 }
+    measurement:
+      manifests: "find codex-rs -name Cargo.toml -not -path '*/target/*' | wc -l"
+      rust_files: "find codex-rs -name '*.rs' -not -path '*/target/*' | wc -l"
+      rust_loc: "find codex-rs -name '*.rs' -not -path '*/target/*' -print0 | xargs -0 wc -l"
 
 overview:
   - id: overview-main
@@ -58,3 +57,9 @@ parts:
       - { id: ch23, title: Cloud Tasks 与外部 Agent 迁移 }
       - { id: ch24, title: Codex vs Claude Code / Opencode 架构对比 }
       - { id: ch25, title: Codex 沙箱与权限模型 vs 同类 }
+
+supplements:
+  - { id: appendix_f, title: Context 预算、压缩与 Reference Context, filename: Appendix/F-Context预算压缩与ReferenceContext.md }
+  - { id: appendix_g, title: Multi-Agent、Review、Guardian 与 Goal, filename: Appendix/G-MultiAgentReviewGuardian与Goal.md }
+  - { id: appendix_h, title: 工程测试、Schema 与可观测性, filename: Appendix/H-工程测试Schema与可观测性.md }
+  - { id: appendix_i, title: PathUri、环境注册与远程执行, filename: Appendix/I-PathUri环境注册与远程执行.md }
