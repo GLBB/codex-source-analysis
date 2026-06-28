@@ -97,12 +97,12 @@ next_event：core -> 外部
 codex-rs/core/src/codex_thread.rs
 ```
 
-搜索：
+这一站重点看四个入口：
 
-```bash
-rg -n "pub struct CodexThread|pub async fn submit|pub async fn next_event|shutdown_and_wait" \
-  codex-rs/core/src/codex_thread.rs
-```
+- `CodexThread` 结构体；
+- `submit`：外部把操作送进 core；
+- `next_event`：外部从 core 取事件；
+- `shutdown_and_wait`：关闭底层 session loop 并等待结束。
 
 你会看到 `CodexThread` 里有一个核心字段：
 
@@ -155,14 +155,14 @@ CodexThread = 外部持有的 thread 句柄
 codex-rs/core/src/session/mod.rs
 ```
 
-搜索：
+先看 `Codex` 结构体，再看它的三个入口方法：
 
-```bash
-rg -n "pub struct Codex|pub\\(crate\\) async fn spawn|pub async fn submit|submit_with_id|pub async fn next_event" \
-  codex-rs/core/src/session/mod.rs
+```text
+Codex
+Codex::submit
+Codex::submit_with_id
+Codex::next_event
 ```
-
-先看 `Codex` 结构体：
 
 ```rust
 pub struct Codex {
@@ -282,24 +282,21 @@ Codex::spawn
 codex-rs/core/src/thread_manager.rs
 ```
 
-搜索：
-
-```bash
-rg -n "pub async fn start_thread|start_thread_with_tools|start_thread_with_options|spawn_thread_with_source|Codex::spawn|CodexThread::new" \
-  codex-rs/core/src/thread_manager.rs
-```
-
 目标是拼出：
 
 ```text
 ThreadManager::start_thread
   -> start_thread_with_tools
   -> start_thread_with_options
-  -> spawn_thread_with_source
+  -> start_thread_with_options_and_fork_source
+  -> ThreadManagerState::spawn_thread_with_source
   -> Codex::spawn
+  -> finalize_thread_spawn
   -> CodexThread::new
-  -> threads.insert(thread_id, thread)
+  -> threads.entry(thread_id).insert(thread)
 ```
+
+中间会经过 state/finalize 层。第一遍只看“创建 `Codex`”和“登记 `CodexThread`”这两个动作，不必展开每个参数。
 
 关注点：
 
@@ -330,20 +327,16 @@ ThreadManager 是工厂和注册表，run_turn 不在这里。
 codex-rs/core/src/session/handlers.rs
 ```
 
-搜索：
-
-```bash
-rg -n "submission_loop|handle_submission|Op::UserInput|user_input_or_turn_inner|submission_dispatch_span" \
-  codex-rs/core/src/session/handlers.rs
-```
-
 重点看：
 
 ```text
 submission_loop
   -> rx_sub.recv()
   -> submission_dispatch_span
-  -> handle_submission
+  -> match sub.op
+  -> Op::UserInput
+  -> user_input_or_turn
+  -> user_input_or_turn_inner
 ```
 
 你要确认：
@@ -377,13 +370,6 @@ submission_loop
 
 ```text
 codex-rs/core/src/tasks/regular.rs
-```
-
-搜索：
-
-```bash
-rg -n "impl SessionTask for RegularTask|TurnStarted|run_turn" \
-  codex-rs/core/src/tasks/regular.rs
 ```
 
 重点看：
@@ -422,13 +408,6 @@ EventMsg::TurnStarted 是在哪里发出的？
 
 ```text
 codex-rs/core/src/session/turn.rs
-```
-
-搜索：
-
-```bash
-rg -n "pub\\(crate\\) async fn run_turn|loop \\{|run_sampling_request|run_auto_compact|run_turn_stop_hooks|TurnDiffTracker" \
-  codex-rs/core/src/session/turn.rs
 ```
 
 第一次读 `run_turn`，只分块，不进细节。
@@ -478,12 +457,16 @@ run_turn
 
 ## 9. 第九站：理解一次 sampling
 
-仍然在 `turn.rs`，搜索：
+仍然在 `turn.rs`。这一站只顺着一次采样读四个位置：
 
-```bash
-rg -n "pub\\(crate\\) fn build_prompt|async fn run_sampling_request|ResponseEvent|ToolCallRuntime|handle_output_item_done" \
-  codex-rs/core/src/session/turn.rs codex-rs/core/src/stream_events_utils.rs
+```text
+build_prompt
+run_sampling_request
+try_run_sampling_request
+ResponseEvent 处理分支
 ```
+
+遇到 `handle_output_item_done` 时，跳到 `stream_events_utils.rs` 看它如何把模型返回的 output item 转成历史记录、事件或工具调用结果。
 
 关注点：
 
@@ -515,11 +498,15 @@ history + context + tools
 
 ## 10. 第十站：找循环继续的原因
 
-回到 `run_turn` 的 loop，搜索：
+回到 `run_turn` 的 loop。读这一段时，把几个状态变量当成路标：
 
-```bash
-rg -n "pending_input|model_needs_follow_up|needs_follow_up|auto_compact_needed|stop_hook|can_drain_pending_input" \
-  codex-rs/core/src/session/turn.rs
+```text
+pending_input
+model_needs_follow_up
+needs_follow_up
+auto_compact_needed
+stop_hook_active
+can_drain_pending_input
 ```
 
 把继续原因归类：
@@ -548,12 +535,6 @@ rg -n "pending_input|model_needs_follow_up|needs_follow_up|auto_compact_needed|s
 ## 11. 第十一站：看事件从哪里发出来
 
 现在把视角切到可观测性。
-
-搜索：
-
-```bash
-rg -n "TurnStarted|TurnComplete|TurnAborted|send_event\\(|send_event_raw" codex-rs/core/src
-```
 
 重点位置：
 
@@ -598,13 +579,6 @@ sample 只映射一部分事件；完整客户端会处理更多事件。
 codex-rs/core/src/tasks/mod.rs
 ```
 
-搜索：
-
-```bash
-rg -n "on_task_finished|TurnComplete|TurnAborted|TURN_TOKEN_USAGE_METRIC|TURN_E2E_DURATION_METRIC" \
-  codex-rs/core/src/tasks/mod.rs
-```
-
 关注点：
 
 1. `run_turn` 返回后，task 统一进入 `on_task_finished`；
@@ -627,22 +601,16 @@ rg -n "on_task_finished|TurnComplete|TurnAborted|TURN_TOKEN_USAGE_METRIC|TURN_E2
 
 ## 13. 第十三站：用 tracing 和 metrics 验证理解
 
-搜索：
+最后再看 tracing 和 metrics。不要把它当成另一条主线，只把它当成验证理解的路标。
 
-```bash
-rg -n "submission_dispatch_span|info_span!|trace_span!|instrument\\(" \
-  codex-rs/core/src/session codex-rs/core/src/tasks codex-rs/core/src/thread_manager.rs
-
-rg -n "TURN_E2E_DURATION_METRIC|TURN_TOKEN_USAGE_METRIC|TURN_TOOL_CALL_METRIC|record_duration|counter\\(" \
-  codex-rs/core/src codex-rs/otel/src
-```
+先看 `submission_dispatch_span`，它回答“这个 `Op` 是怎么被分发的”。再看 task 层围绕 turn 创建的 span，例如 `session_task.turn`、`session_task.run` 和 `run_turn`，它们把一次用户 turn 的线程、模型、token 字段串起来。最后看 task 收尾处记录的 token、工具调用次数和端到端耗时。
 
 关注点：
 
 | 可观测性 | 对应问题 |
 | --- | --- |
 | `submission_dispatch_span` | 这个 `Op` 是怎么被分发的？ |
-| `info_span!("turn")` | 这个 turn 属于哪个 thread、哪个 model？ |
+| `session_task.turn` / `run_turn` | 这个 turn 属于哪个 thread、哪个 model？ |
 | `TurnStarted/TurnComplete` | 用户可见生命周期在哪里开始/结束？ |
 | token metrics | 这一轮用了多少 token？ |
 | tool metrics | 这一轮调用了多少工具？ |
