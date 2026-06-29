@@ -19,7 +19,7 @@
 用户提交一次输入
   -> 外部把 Op::UserInput 交给 CodexThread
   -> Codex 把 Submission 放入 channel
-  -> Session loop 取出 Submission
+  -> 后台 submission_loop 取出 Submission
   -> Op::UserInput 被分派成 RegularTask
   -> RegularTask 进入 session::turn::run_turn
   -> run_turn 可能多次请求模型和执行工具
@@ -147,7 +147,7 @@ CodexThread = 外部持有的 thread 句柄
 **问：为什么不直接暴露 Session？**  
 因为 `Session` 太强大，包含大量内部可变状态。`CodexThread` 是更窄、更安全的 API 边界。
 
-## 3. 第三站：`Codex` 是 submit/event 双队列
+## 3. 第三站：`Codex` 是两条单向队列的门面
 
 打开：
 
@@ -173,31 +173,57 @@ pub struct Codex {
 }
 ```
 
-这个结构是理解 core 的关键。它可以被看成：
+这个结构是理解 core 的关键。源码注释说它是一个 queue pair：外部往里送 `Submission`，外部再从里面收 `Event`。这两条路方向相反，但都集中在 `Codex` 这个门面上。
+
+先把字段按“外部能做什么”来读：
 
 ```text
 Codex
-  tx_sub    接收外部提交的 Submission
-  rx_event  向外部输出 Event
-  session   保存内部长期状态
+  tx_sub    外部用它把 Submission 发送给后台 session loop
+  rx_event  外部用它从后台 session loop 接收 Event
+  session   指向内部长期状态；Codex 持有它，但不在 submit 里直接跑 turn
 ```
 
-再看提交链：
+注意这里的名字容易误导：`tx_sub` 里的 `tx` 是 sender。`Codex` 持有的是发送端；真正接收 `Submission` 的 `rx_sub` 不在结构体里，它被交给了后台的 `submission_loop`。反过来，`rx_event` 是 event 的接收端；发送端 `tx_event` 放在 `Session` 里，内部代码通过 `Session::send_event(...)` 把事件发出来。
+
+所以这不是“一条队列”，而是两条单向通道：
 
 ```text
-CodexThread::submit
-  -> Codex::submit
-  -> Codex::submit_with_id
+提交方向：
+外部调用方
+  -> CodexThread::submit(...)
+  -> Codex::submit(...)
+  -> Codex::submit_with_id(...)
   -> tx_sub.send(Submission)
+  -> 后台 submission_loop 从 rx_sub.recv() 取出 Submission
+
+事件方向：
+内部 Session
+  -> Session::send_event(...) / send_event_raw(...)
+  -> tx_event.send(Event)
+  -> Codex::next_event(...)
+  -> rx_event.recv()
+  -> 外部调用方
 ```
 
-再看事件链：
+再把它和前两站连起来：
 
 ```text
-Session::send_event
-  -> tx_event.send(Event)
-  -> Codex::next_event
-  -> rx_event.recv()
+sample 持有 CodexThread
+  -> CodexThread 转发给 Codex
+  -> Codex 只负责把输入放进队列、把事件从队列拿出来
+  -> Session / submission_loop / task 才负责真正执行 turn
+```
+
+这一站最容易读错的是“submit 返回了什么”。`submit` 返回的是 submission id，不是模型最终回答。这个 id 用来标识这次提交，后面的事件也会带着对应的 id 或 turn id；真正的输出要继续通过 `next_event()` 一条条读。
+
+可以用一个非常小的时序图记住：
+
+```text
+时间 1：外部 submit(Op::UserInput)      -> 得到 submission id
+时间 2：后台 loop 收到 Submission       -> 分发成 task
+时间 3：task / turn 持续发 EventMsg      -> 外部 next_event() 逐条收到
+时间 4：外部收到 TurnComplete/Aborted   -> 这一 turn 才算结束
 ```
 
 不要纠结：
@@ -210,8 +236,8 @@ Session::send_event
 这一站你要建立的心智模型是：
 
 ```text
-Codex 不是直接同步调用 Agent。
-Codex 是外部和内部 session loop 之间的异步队列桥。
+Codex 不是“调用 Agent 并等待回答”的对象。
+Codex 是外部调用方和后台 session loop 之间的异步收发门面。
 ```
 
 检查自己：
@@ -223,7 +249,9 @@ Codex 是外部和内部 session loop 之间的异步队列桥。
 答案：
 
 ```text
-submit 只是把 Submission 放进 tx_sub。真正执行在后台 session_loop 中，结果会异步变成 Event。
+submit 只是生成 id，并把 Submission 放进 tx_sub。
+真正执行发生在后台 submission_loop 里。
+执行过程和结果会被包装成 Event，通过 rx_event 被 next_event 读出来。
 ```
 
 ## 4. 第四站：`Codex::spawn` 启动后台 session loop
@@ -256,12 +284,22 @@ tokio::spawn(submission_loop(...))
 Codex::spawn
   -> 创建 tx_sub / rx_sub
   -> 创建 tx_event / rx_event
+  -> 把 tx_event 交给 Session
   -> Session::new(...)
-  -> tokio::spawn(submission_loop(session, config, rx_sub))
+  -> 把 rx_sub 交给 tokio::spawn(submission_loop(...))
   -> 返回 Codex { tx_sub, rx_event, session, ... }
 ```
 
 这一步非常关键：它解释了为什么后面是异步状态机。
+
+把第 3 站和第 4 站合起来看，四个通道端点各有归属：
+
+| 端点 | 谁持有 | 用途 |
+| --- | --- | --- |
+| `tx_sub` | `Codex` | 外部提交 `Submission`。 |
+| `rx_sub` | `submission_loop` | 后台接收并分发 `Submission`。 |
+| `tx_event` | `Session` | 内部发送 `Event`。 |
+| `rx_event` | `Codex` | 外部读取 `Event`。 |
 
 常见疑问：
 
@@ -337,6 +375,7 @@ submission_loop
   -> Op::UserInput
   -> user_input_or_turn
   -> user_input_or_turn_inner
+  -> sess.spawn_task(..., RegularTask::new())
 ```
 
 你要确认：
@@ -344,7 +383,8 @@ submission_loop
 1. `Submission` 是从 `rx_sub` 取出来的；
 2. 每个 submission 会有一个 tracing span；
 3. `Op::UserInput` 会被分派到用户输入处理路径；
-4. 用户输入最终会触发 regular turn。
+4. `user_input_or_turn_inner` 会建立新的 turn context；
+5. 如果当前没有可 steering 的 active turn，用户输入会进入 `RegularTask`。
 
 不要一次性读完整 `handlers.rs`，它会处理很多 `Op`：
 
@@ -363,6 +403,9 @@ submission_loop
 
 **问：为什么有这么多 Op？**  
 因为 `submit` 不只提交用户消息，也提交控制操作。比如 interrupt、approval response、compact 都是运行时控制面。
+
+**问：`Op::UserInput` 为什么不是直接调用 `run_turn`？**  
+因为 handlers 层还要先处理 thread settings、turn context、pending input 和 active turn。真正的普通 turn 会通过 `sess.spawn_task(..., RegularTask::new())` 进入 task 生命周期。
 
 ## 7. 第七站：`RegularTask` 是普通用户 turn 的入口
 
@@ -623,26 +666,30 @@ codex-rs/core/src/tasks/mod.rs
 
 ```text
 1. 外部调用 CodexThread::submit(Op::UserInput)。
-2. Codex::submit 把 Submission 送入 tx_sub。
-3. 后台 submission_loop 从 rx_sub 取出 Submission。
-4. handlers 根据 Op 类型分发。
-5. Op::UserInput 创建或进入 active turn。
-6. 普通 turn 由 RegularTask 执行。
-7. RegularTask 先发 TurnStarted。
-8. RegularTask 调用 session::turn::run_turn。
-9. run_turn 准备上下文、hooks、skills、history。
-10. run_turn 进入 loop。
-11. 每轮 loop 构建 StepContext 和 Prompt。
-12. run_sampling_request 请求模型。
-13. 模型可能返回工具调用或 assistant message。
-14. 工具调用执行后，结果写回 history。
-15. 如果还需要继续，就再次 sampling。
-16. 如果可以结束，run_turn 返回。
-17. task 层 on_task_finished 记录指标并发 TurnComplete。
-18. 外部 next_event 收到 TurnComplete。
+2. CodexThread 把调用转发给内部 Codex。
+3. Codex::submit 生成 submission id。
+4. Codex::submit_with_id 把 Submission 送入 tx_sub。
+5. 后台 submission_loop 从 rx_sub 取出 Submission。
+6. handlers 根据 Op 类型分发。
+7. Op::UserInput 进入 user_input_or_turn_inner。
+8. handlers 建立 turn context，整理用户输入和 additional context。
+9. 普通用户输入通过 sess.spawn_task(..., RegularTask::new()) 启动 task。
+10. RegularTask 先发 TurnStarted。
+11. RegularTask 调用 session::turn::run_turn。
+12. run_turn 准备上下文、hooks、skills、history。
+13. run_turn 进入 loop。
+14. 每轮 loop 构建 StepContext 和 Prompt。
+15. run_sampling_request 请求模型。
+16. 模型可能返回工具调用或 assistant message。
+17. 工具调用执行后，结果写回 history。
+18. 如果还需要继续，就再次 sampling。
+19. 如果可以结束，run_turn 返回。
+20. task 层 on_task_finished 记录指标并发 TurnComplete。
+21. Session 通过 tx_event 发出 Event。
+22. 外部 next_event 从 rx_event 收到 TurnComplete。
 ```
 
-如果能顺畅讲出这 18 步，就说明主线已经打通。
+如果能顺畅讲出这 22 步，就说明主线已经打通。
 
 ## 15. 常见卡点与解法
 
@@ -651,11 +698,11 @@ codex-rs/core/src/tasks/mod.rs
 先这样记：
 
 ```text
-Codex = 队列接口，负责 submit / next_event
-Session = 内部状态，负责真正处理 turn
+Codex = 队列门面，负责 submit / next_event
+Session = 内部状态和事件发送者，负责支撑真正的 turn 执行
 ```
 
-`Codex` 更像门口的收发室，`Session` 才是内部办公室。
+`Codex` 更像门口的收发室。它收外部提交，也把内部事件递给外部；`Session` 才保存线程状态、发事件、支撑 task 和 turn。
 
 ### 卡点 2：为什么不直接调用 `run_turn`
 
@@ -729,7 +776,7 @@ tracing span：运行时调用链怎么标记
 | --- | --- |
 | sample | 能解释 submit 和 next_event 的方向。 |
 | CodexThread | 能解释它只是 thread 句柄。 |
-| Codex | 能解释 tx_sub / rx_event 双队列。 |
+| Codex | 能解释 tx_sub / rx_sub、tx_event / rx_event 两条单向通道。 |
 | Codex::spawn | 能解释 submission_loop 是后台任务。 |
 | ThreadManager | 能解释它负责创建和登记 thread。 |
 | handlers | 能解释 Op::UserInput 怎么进入 regular task。 |
