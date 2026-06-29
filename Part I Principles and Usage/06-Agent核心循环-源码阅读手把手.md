@@ -407,7 +407,7 @@ submission_loop
 **问：`Op::UserInput` 为什么不是直接调用 `run_turn`？**  
 因为 handlers 层还要先处理 thread settings、turn context、pending input 和 active turn。真正的普通 turn 会通过 `sess.spawn_task(..., RegularTask::new())` 进入 task 生命周期。
 
-## 7. 第七站：`RegularTask` 是普通用户 turn 的入口
+## 7. 第七站：`RegularTask` 是普通用户 turn 的 task 实现
 
 打开：
 
@@ -415,13 +415,18 @@ submission_loop
 codex-rs/core/src/tasks/regular.rs
 ```
 
+这一站要接住第六站最后的 `sess.spawn_task(..., RegularTask::new())`。先不要直接跳进 `run_turn`，先看 `RegularTask` 在 task 框架里负责哪一段。
+
 重点看：
 
 ```text
 impl SessionTask for RegularTask
+  -> kind() / span_name()
   -> run(...)
   -> emit EventMsg::TurnStarted
+  -> consume_startup_prewarm_for_regular_turn(...)
   -> session::turn::run_turn(...)
+  -> loop 检查 input_queue.has_pending_input(...)
 ```
 
 这一步回答一个关键问题：
@@ -432,12 +437,53 @@ EventMsg::TurnStarted 是在哪里发出的？
 
 答案：普通 turn 在 `RegularTask::run` 里发出 `TurnStarted`，然后才进入真正的 `run_turn`。
 
+但这里有一个边界要分清：
+
+```text
+Session::start_task
+  负责创建 task、登记 active turn、打开 task span、tokio::spawn 后台任务
+
+RegularTask::run
+  负责普通用户 turn 的业务执行：发 TurnStarted、准备 prewarm、调用 run_turn
+
+Session::on_task_finished
+  负责统一收尾：flush rollout、记录 metrics、发 TurnComplete / TurnAborted
+```
+
+所以 `RegularTask` 不是“整个 task 生命周期管理器”。它是普通用户 turn 在 `SessionTask` 框架里的执行体。
+
 关注点：
 
-1. `RegularTask` 实现了 `SessionTask`；
-2. task 有统一生命周期；
-3. 普通用户 turn 的具体执行交给 `session::turn::run_turn`；
-4. `run_turn` 返回后，如果还有 pending input，`RegularTask` 可能继续调用 `run_turn`。
+1. `RegularTask` 是 `SessionTask` trait 的一个实现；
+2. `kind()` 返回 `TaskKind::Regular`，`span_name()` 返回 `session_task.turn`；
+3. `RegularTask::run` 先发 `EventMsg::TurnStarted`；
+4. startup prewarm 只是在进入 `run_turn` 前尝试复用模型 client session；
+5. 普通用户 turn 的具体执行交给 `session::turn::run_turn`；
+6. `run_turn` 返回后，`RegularTask` 会检查 `input_queue.has_pending_input(...)`；
+7. 如果还有 pending input，`RegularTask` 用空 `next_input` 再次调用 `run_turn`，让下一轮从 queue 里 drain 追加输入；
+8. 如果没有 pending input，`RegularTask::run` 返回 `last_agent_message`，后续由 `Session::on_task_finished` 发 `TurnComplete`。
+
+这一步的心智模型可以这样画：
+
+```text
+Session::start_task(...)
+  -> tokio::spawn(task.run(...))
+  -> RegularTask::run
+       -> TurnStarted
+       -> run_turn(input)
+       -> 如果 input_queue 还有 pending input，再 run_turn(Vec::new())
+       -> 返回 last_agent_message
+  -> Session::on_task_finished(...)
+       -> TurnComplete / TurnAborted
+```
+
+常见疑问：
+
+**问：为什么 `RegularTask` 里有一个 loop，`run_turn` 里也有 loop？**  
+`run_turn` 里的 loop 处理同一次模型执行过程中的继续原因，比如工具调用、自动压缩、stop hook 和可 drain 的 pending input。`RegularTask` 外层 loop 是兜底：如果 `run_turn` 返回时队列里仍然有 pending input，就用同一个 task 生命周期再跑一次 `run_turn`。
+
+**问：为什么 `TurnComplete` 不在 `RegularTask::run` 里发？**  
+因为不同 task 共用统一收尾逻辑。`RegularTask::run` 只返回结果，`Session::on_task_finished` 负责 metrics、rollout flush 和最终 `TurnComplete / TurnAborted`。
 
 不要纠结：
 
