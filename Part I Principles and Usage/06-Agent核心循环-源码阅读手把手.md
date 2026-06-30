@@ -21,6 +21,7 @@
   -> Codex 把 Submission 放入 channel
   -> 后台 submission_loop 取出 Submission
   -> Op::UserInput 被分派成 RegularTask
+  -> Session task 框架登记 active turn 并启动后台 task
   -> RegularTask 进入 session::turn::run_turn
   -> run_turn 可能多次请求模型和执行工具
   -> core 发出 EventMsg
@@ -407,6 +408,103 @@ submission_loop
 **问：`Op::UserInput` 为什么不是直接调用 `run_turn`？**  
 因为 handlers 层还要先处理 thread settings、turn context、pending input 和 active turn。真正的普通 turn 会通过 `sess.spawn_task(..., RegularTask::new())` 进入 task 生命周期。
 
+## 6.5. 第六点五站：`spawn_task` 进入 task 框架
+
+打开：
+
+```text
+codex-rs/core/src/tasks/mod.rs
+```
+
+第六站最后看到的是：
+
+```text
+sess.spawn_task(..., RegularTask::new())
+```
+
+先不要直接跳到 `RegularTask::run`。中间还有一层 task 框架，它解释“这个 task 是怎么被启动、登记、收尾的”。
+
+重点看：
+
+```text
+Session::spawn_task
+  -> abort_all_tasks(TurnAbortReason::Replaced)
+  -> clear_connector_selection()
+  -> start_task(...)
+
+Session::start_task
+  -> 创建 CancellationToken / Notify
+  -> 记录 turn started 时间和 token 起点
+  -> 把已有 pending input 归到当前 turn state
+  -> emit_turn_start_lifecycle(...)
+  -> 创建 session_task.turn span
+  -> tokio::spawn(async move { task.run(...).await; ... })
+  -> task.run 返回后 flush_rollout()
+  -> Session::on_task_finished(...)
+```
+
+这一站回答一个很容易漏掉的问题：
+
+```text
+RegularTask::run 是谁调用的？
+```
+
+答案不是 `handlers.rs` 直接调用，而是 `Session::start_task` 把 `RegularTask` 包成一个后台 Tokio task，然后在后台 task 里调用 `task.run(...)`。
+
+这里还有一个边界要分清：
+
+```text
+Session::spawn_task
+  负责替换当前任务：先中断旧 task，再启动新 task。
+
+Session::start_task
+  负责通用 task 生命周期：登记 active turn、创建取消令牌、打开 span、启动后台任务、统一收尾。
+
+RegularTask::run
+  只负责普通用户 turn 的业务执行。
+```
+
+所以第六站和第七站之间真正的桥是：
+
+```text
+user_input_or_turn_inner
+  -> sess.spawn_task(..., RegularTask::new())
+  -> Session::spawn_task
+  -> Session::start_task
+  -> tokio::spawn(...)
+  -> task.run(...)
+  -> RegularTask::run
+```
+
+关注点：
+
+1. `spawn_task` 会先替换旧的 active task；
+2. `start_task` 是所有 `SessionTask` 共用的启动框架；
+3. `RegularTask` 只是作为参数传进去的具体 task 实现；
+4. `tokio::spawn` 之后，`submission_loop` 不会同步等待模型跑完；
+5. task 结束后的 `TurnComplete / TurnAborted` 也在 task 框架里统一处理。
+
+不要纠结：
+
+- 每个 tracing 字段；
+- guardian circuit breaker 的细节；
+- token metrics 的完整计算；
+- compact/review/user-shell task 的差异。
+
+检查自己：
+
+```text
+我能否说清楚 handlers.rs 为什么只到 spawn_task，而 RegularTask::run 为什么还能被调用？
+```
+
+答案应该是：
+
+```text
+handlers.rs 只决定启动哪个 SessionTask；
+tasks/mod.rs 负责把这个 SessionTask 放进后台任务并调用 run；
+regular.rs 才定义普通用户 turn 的 run 具体做什么。
+```
+
 ## 7. 第七站：`RegularTask` 是普通用户 turn 的 task 实现
 
 打开：
@@ -415,7 +513,7 @@ submission_loop
 codex-rs/core/src/tasks/regular.rs
 ```
 
-这一站要接住第六站最后的 `sess.spawn_task(..., RegularTask::new())`。先不要直接跳进 `run_turn`，先看 `RegularTask` 在 task 框架里负责哪一段。
+这一站要接住第六点五站最后的 `task.run(...)`。先不要直接跳进 `run_turn`，先看 `RegularTask` 在 task 框架里负责哪一段。
 
 重点看：
 
@@ -720,22 +818,25 @@ codex-rs/core/src/tasks/mod.rs
 7. Op::UserInput 进入 user_input_or_turn_inner。
 8. handlers 建立 turn context，整理用户输入和 additional context。
 9. 普通用户输入通过 sess.spawn_task(..., RegularTask::new()) 启动 task。
-10. RegularTask 先发 TurnStarted。
-11. RegularTask 调用 session::turn::run_turn。
-12. run_turn 准备上下文、hooks、skills、history。
-13. run_turn 进入 loop。
-14. 每轮 loop 构建 StepContext 和 Prompt。
-15. run_sampling_request 请求模型。
-16. 模型可能返回工具调用或 assistant message。
-17. 工具调用执行后，结果写回 history。
-18. 如果还需要继续，就再次 sampling。
-19. 如果可以结束，run_turn 返回。
-20. task 层 on_task_finished 记录指标并发 TurnComplete。
-21. Session 通过 tx_event 发出 Event。
-22. 外部 next_event 从 rx_event 收到 TurnComplete。
+10. Session::spawn_task 先替换旧 task，然后进入 start_task。
+11. Session::start_task 登记 active turn，创建取消令牌和 task span。
+12. start_task 用 tokio::spawn 启动后台 task，并调用 task.run。
+13. RegularTask 先发 TurnStarted。
+14. RegularTask 调用 session::turn::run_turn。
+15. run_turn 准备上下文、hooks、skills、history。
+16. run_turn 进入 loop。
+17. 每轮 loop 构建 StepContext 和 Prompt。
+18. run_sampling_request 请求模型。
+19. 模型可能返回工具调用或 assistant message。
+20. 工具调用执行后，结果写回 history。
+21. 如果还需要继续，就再次 sampling。
+22. 如果可以结束，run_turn 返回。
+23. task 层 on_task_finished 记录指标并发 TurnComplete。
+24. Session 通过 tx_event 发出 Event。
+25. 外部 next_event 从 rx_event 收到 TurnComplete。
 ```
 
-如果能顺畅讲出这 22 步，就说明主线已经打通。
+如果能顺畅讲出这 25 步，就说明主线已经打通。
 
 ## 15. 常见卡点与解法
 
@@ -826,6 +927,7 @@ tracing span：运行时调用链怎么标记
 | Codex::spawn | 能解释 submission_loop 是后台任务。 |
 | ThreadManager | 能解释它负责创建和登记 thread。 |
 | handlers | 能解释 Op::UserInput 怎么进入 regular task。 |
+| task 框架 | 能解释 spawn_task/start_task 如何调用 RegularTask::run。 |
 | RegularTask | 能解释 TurnStarted 和 run_turn 的关系。 |
 | run_turn 主干 | 能画出准备、loop、sampling、继续/结束。 |
 | sampling | 能解释工具调用为什么导致再次请求模型。 |
@@ -844,7 +946,7 @@ sample -> CodexThread -> Codex::submit/next_event
 第二天：
 
 ```text
-Codex::spawn -> submission_loop -> handlers -> RegularTask
+Codex::spawn -> submission_loop -> handlers -> task 框架 -> RegularTask
 ```
 
 第三天：

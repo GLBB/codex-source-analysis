@@ -17,6 +17,7 @@ These instructions apply to all files in this repository. They are meant to pres
 - When an API returns an id, ack, handle, or subscription rather than the final result, say so directly.
 - Do not describe asynchronous control flow as if it were a synchronous function return.
 - Include a short mental replay that crosses async boundaries: external entry, background receive, dispatch, task or loop execution, event emission, and external consumption.
+- When one stop hands off to another through a framework method, scheduler, trait object, or lifecycle wrapper, add an explicit bridge stop instead of jumping from the call site to the eventual implementation.
 
 ## Terminology And Mental Models
 
@@ -43,4 +44,5 @@ When reviewing or revising a source-reading article, check:
 - Are terms consistent across the article?
 - Does each section have a useful stopping standard?
 - Does the final mental replay include both input and output paths?
+- Does the path include bridge layers such as task frameworks, lifecycle wrappers, trait dispatch, spawned tasks, and scheduler handoffs between adjacent sections?
 - Are commands used for verification rather than as the primary reading navigation?
